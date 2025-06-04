@@ -1,21 +1,16 @@
 # Political Latent Space Visualizer - Projektplanung
 
 ## Projektübersicht
-Dieses Uni-Projekt zielt darauf ab, eine interaktive Installation zu entwickeln, die politische Bewegungen in einem semantischen Raum visualisiert. Wir nutzen den vorhandenen Prototyp `enhanced_political_analyzer.py` als Grundlage und entwickeln daraus eine webbasierte Visualisierung für eine einmalige Präsentation.
+Dieses Uni-Projekt zielt darauf ab, eine interaktive Installation zu entwickeln, die politische Bewegungen in einem semantischen Raum visualisiert. Wir orientieren uns an der Idee und grundlegend den Prototypen folder, jedoch sind einige anpassungen und verbesserungen der Prototypen notwendung um als Grundlage zu dienen und entwickeln daraus eine webbasierte Visualisierunn.
 
-## Teamstruktur (3 Personen)
+## Teamstruktur To do's (3 Personen)
 
-### Person 1: Datenaufbereitung & NLP
 - Verantwortlich für die Sammlung und Aufbereitung politischer Texte
 - Anpassung des `HybridPoliticalSpace`-Modells für die Kontextanalyse
 - Generierung der finalen Daten für die Visualisierung
-
-### Person 2: Visualisierung & Frontend
 - Entwicklung der interaktiven Visualisierung mit D3.js oder p5.js
 - Gestaltung der Benutzeroberfläche
 - Integration der vorverarbeiteten Daten
-
-### Person 3: Projektkoordination & Dokumentation
 - Koordination des Teams und Zeitplanung
 - Erstellung der Präsentationsmaterialien
 - Unterstützung bei Datensammlung und Visualisierung
