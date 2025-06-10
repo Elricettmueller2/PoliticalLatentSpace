@@ -75,3 +75,9 @@ venv.bak/
 
 # Project specific
 .DS_Store
+
+# Large data files
+src/data/processed/political_latent_space.json
+*.json
+# Uncomment the line below if you want to track specific json files
+# !src/config.json
