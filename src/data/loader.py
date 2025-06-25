@@ -4,7 +4,7 @@ Data loading functionality for political texts.
 
 import os
 import glob
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import re
 import PyPDF2
 
@@ -180,6 +180,109 @@ class PoliticalTextLoader:
             return {"error": f"{movement} directory not found"}
         
         return self._get_directory_structure(movement_path)
+    
+    def load_politician_texts(self, movements: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
+        """
+        Load texts for individual politicians, organized by their movements.
+        
+        Args:
+            movements: Optional list of movement names to filter by.
+                      If None, load politicians from all movements.
+                      
+        Returns:
+            Dictionary mapping politician names to their data:
+            {
+                'politician_name': {
+                    'text': combined text content,
+                    'movement': movement name,
+                    'files': list of source files
+                }
+            }
+        """
+        if movements is None:
+            movements = self.get_available_movements()
+        
+        politician_texts = {}
+        
+        for movement in movements:
+            movement_path = os.path.join(self.base_dir, movement)
+            if not os.path.isdir(movement_path):
+                print(f"Warning: {movement_path} is not a directory. Skipping.")
+                continue
+            
+            # Find all subdirectories that could be politicians
+            # We'll consider any directory that's not named 'politicians' as a potential politician directory
+            items = os.listdir(movement_path)
+            potential_politician_dirs = [d for d in items 
+                                        if os.path.isdir(os.path.join(movement_path, d)) 
+                                        and d.lower() != 'politicians']
+            
+            for politician_dir in potential_politician_dirs:
+                politician_path = os.path.join(movement_path, politician_dir)
+                
+                # Check if this looks like a politician directory (contains text or PDF files)
+                if self._is_politician_directory(politician_path):
+                    politician_name = politician_dir
+                    print(f"Loading texts for politician: {politician_name} ({movement})")
+                    
+                    # Load all text from this politician's directory
+                    politician_text = self.load_movement_directory(politician_path)
+                    
+                    if politician_text:
+                        # Get list of source files
+                        source_files = self._get_text_and_pdf_files(politician_path)
+                        
+                        politician_texts[politician_name] = {
+                            'text': politician_text,
+                            'movement': movement,
+                            'files': source_files
+                        }
+                    else:
+                        print(f"No text content found for politician {politician_name}.")
+        
+        return politician_texts
+    
+    def _is_politician_directory(self, directory: str) -> bool:
+        """
+        Check if a directory appears to be a politician directory.
+        
+        Args:
+            directory: Path to check
+            
+        Returns:
+            True if the directory contains text or PDF files that likely belong to a politician
+        """
+        # Check for text or PDF files
+        text_files = glob.glob(os.path.join(directory, "*.txt"))
+        pdf_files = glob.glob(os.path.join(directory, "*.pdf"))
+        
+        return len(text_files) > 0 or len(pdf_files) > 0
+    
+    def _get_text_and_pdf_files(self, directory: str) -> List[str]:
+        """
+        Get all text and PDF files in a directory and its subdirectories.
+        
+        Args:
+            directory: Directory to search
+            
+        Returns:
+            List of file paths
+        """
+        files = []
+        
+        # Get text and PDF files in this directory
+        text_files = glob.glob(os.path.join(directory, "*.txt"))
+        pdf_files = glob.glob(os.path.join(directory, "*.pdf"))
+        files.extend(text_files)
+        files.extend(pdf_files)
+        
+        # Check subdirectories
+        for item in os.listdir(directory):
+            item_path = os.path.join(directory, item)
+            if os.path.isdir(item_path):
+                files.extend(self._get_text_and_pdf_files(item_path))
+        
+        return files
     
     def _get_directory_structure(self, path: str) -> Dict[str, Any]:
         """

@@ -8,3 +8,4 @@ umap-learn>=0.5.2
 nltk>=3.7
 PyYAML>=6.0
 PyPDF2>=2.0.0
+Flask==3.0.0

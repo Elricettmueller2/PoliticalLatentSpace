@@ -23,17 +23,32 @@ class TextPreprocessor:
         self.language = language
         self._ensure_nltk_resources()
     
-    def preprocess_texts(self, texts_dict: Dict[str, str]) -> Dict[str, str]:
+    def preprocess_texts(self, texts_dict: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Preprocess a dictionary of texts.
+        Preprocess a dictionary of texts. Handles both simple text dictionaries and
+        complex dictionaries with nested text fields (for politicians).
         
         Args:
-            texts_dict: Dictionary mapping names to raw text content
+            texts_dict: Dictionary mapping names to either raw text content or
+                       dictionaries containing text content and metadata
             
         Returns:
-            Dictionary mapping names to preprocessed text content
+            Dictionary mapping names to preprocessed text content or dictionaries
         """
-        return {name: self.preprocess_text(text) for name, text in texts_dict.items()}
+        result = {}
+        for name, content in texts_dict.items():
+            if isinstance(content, str):
+                # Simple case: content is just a string
+                result[name] = self.preprocess_text(content)
+            elif isinstance(content, dict) and 'text' in content:
+                # Complex case: content is a dictionary with a 'text' field
+                processed_content = content.copy()
+                processed_content['text'] = self.preprocess_text(content['text'])
+                result[name] = processed_content
+            else:
+                # Skip invalid entries
+                print(f"Warning: Could not preprocess {name}, invalid content format.")
+        return result
     
     def preprocess_text(self, text: str) -> str:
         """

@@ -30,40 +30,92 @@ def main():
     # Load and preprocess data
     loader = PoliticalTextLoader(config['data']['base_dir'])
     preprocessor = TextPreprocessor()
-    texts_dict = loader.load_movement_texts()
-    preprocessed_texts = preprocessor.preprocess_texts(texts_dict)
+    
+    # Load movement texts
+    print("Loading movement texts...")
+    movement_texts_dict = loader.load_movement_texts()
+    preprocessed_movement_texts = preprocessor.preprocess_texts(movement_texts_dict)
+    
+    # Load politician texts
+    print("Loading politician texts...")
+    politician_texts_dict = loader.load_politician_texts()
+    preprocessed_politician_texts = preprocessor.preprocess_texts(politician_texts_dict)
     
     # Define anchors for the latent space
     latent_space.define_anchors(config['latent_space']['anchors'])
     
-    # Process texts
-    results = {}
-    for name, text in preprocessed_texts.items():
-        print(f"Processing {name}...")
+    # Process movement texts
+    print("\nProcessing political movements...")
+    movement_results = {}
+    for name, text in preprocessed_movement_texts.items():
+        print(f"Processing movement: {name}...")
         position = latent_space.position_text(text)
         key_terms = term_analyzer.extract_key_terms(text)
         term_analyses = {}
         for term, _ in key_terms[:10]:  # Analyze top 10 terms
             term_analyses[term] = term_analyzer.analyze_term_usage(text, term)
         
-        results[name] = {
+        # Calculate position in expert dimensions
+        expert_dimensions = {}
+        for dimension, anchors in config['latent_space'].get('expert_dimensions', {}).items():
+            if len(anchors) == 2:  # Need exactly 2 anchors for a dimension
+                pos = latent_space.position_on_axis(text, anchors[0], anchors[1])
+                expert_dimensions[dimension] = pos
+        
+        movement_results[name] = {
             'position': position,
             'key_terms': key_terms,
-            'term_analyses': term_analyses
+            'term_analyses': term_analyses,
+            'expert_dimensions': expert_dimensions,
+            'embedding': embedder.encode(text).tolist()  # Store the full embedding
+        }
+    
+    # Process politician texts
+    print("\nProcessing individual politicians...")
+    politician_results = {}
+    for name, data in preprocessed_politician_texts.items():
+        text = data['text']
+        movement = data['movement']
+        print(f"Processing politician: {name} ({movement})...")
+        
+        position = latent_space.position_text(text)
+        key_terms = term_analyzer.extract_key_terms(text)
+        term_analyses = {}
+        for term, _ in key_terms[:5]:  # Analyze top 5 terms for politicians
+            term_analyses[term] = term_analyzer.analyze_term_usage(text, term)
+        
+        # Calculate position in expert dimensions
+        expert_dimensions = {}
+        for dimension, anchors in config['latent_space'].get('expert_dimensions', {}).items():
+            if len(anchors) == 2:  # Need exactly 2 anchors for a dimension
+                pos = latent_space.position_on_axis(text, anchors[0], anchors[1])
+                expert_dimensions[dimension] = pos
+        
+        politician_results[name] = {
+            'position': position,
+            'key_terms': key_terms,
+            'term_analyses': term_analyses,
+            'expert_dimensions': expert_dimensions,
+            'movement': movement,
+            'embedding': embedder.encode(text).tolist()  # Store the full embedding
         }
     
     # Perform comparative analysis
+    print("\nPerforming comparative analysis...")
     comparative = ComparativeAnalyzer(latent_space, term_analyzer)
-    comparison = comparative.compare_movements(preprocessed_texts)
+    movement_comparison = comparative.compare_movements(preprocessed_movement_texts)
     
     # Export results
+    print("\nExporting results...")
     exporter = DataExporter(config['output']['dir'])
     exporter.export_to_json({
-        'movements': results,
-        'comparison': comparison,
+        'movements': movement_results,
+        'politicians': politician_results,
+        'comparison': movement_comparison,
         'metadata': {
             'generated_at': datetime.now().isoformat(),
-            'model': config['embedding']['model_name']
+            'model': config['embedding']['model_name'],
+            'includes_politicians': True
         }
     }, config['output']['filename'])
     
