@@ -60,6 +60,102 @@ MOVEMENT_TERMS = {
     'bsw': ['peace', 'diplomacy', 'social', 'justice', 'sovereignty', 'reform', 'dialogue', 'stability', 'pragmatic', 'security']
 }
 
+# Political dimension scores for words to position them in the latent space
+# Format: {word: [economic_score, social_score, ecological_score]}
+# Scores range from -1.0 to 1.0 where:
+# - Economic: Market Liberal (+) vs. Social Democratic (-)
+# - Social: Progressive (+) vs. Conservative (-)
+# - Ecological: Green (+) vs. Industrial (-)
+WORD_DIMENSION_SCORES = {
+    # Economic terms
+    'market': [0.9, 0.0, -0.2],        # Strongly market liberal
+    'economy': [0.7, 0.0, -0.1],       # Market liberal
+    'taxes': [0.5, 0.0, 0.0],          # Somewhat market liberal
+    'budget': [0.6, 0.0, 0.0],         # Market liberal
+    'inflation': [0.4, -0.1, 0.0],     # Somewhat market liberal
+    'jobs': [0.2, 0.3, 0.0],           # Slightly market liberal, slightly progressive
+    'growth': [0.7, 0.2, -0.3],        # Market liberal, slightly progressive, somewhat industrial
+    'debt': [0.3, -0.1, 0.0],          # Somewhat market liberal
+    'deficit': [0.4, -0.1, 0.0],       # Somewhat market liberal
+    'trade': [0.8, 0.1, -0.1],         # Strongly market liberal
+    'investment': [0.6, 0.2, 0.0],     # Market liberal, slightly progressive
+    'regulation': [-0.5, 0.3, 0.5],    # Social democratic, progressive, somewhat green
+    'subsidies': [-0.7, 0.1, 0.3],     # Strongly social democratic
+    'privatization': [0.9, 0.0, -0.2], # Strongly market liberal
+    'austerity': [0.8, -0.3, -0.1],    # Strongly market liberal, somewhat conservative
+    'business': [0.8, 0.0, -0.3],      # Strongly market liberal, somewhat industrial
+    'deregulation': [0.9, -0.1, -0.5], # Strongly market liberal, industrial
+    'competition': [0.8, 0.2, -0.1],   # Strongly market liberal
+    'innovation': [0.5, 0.7, 0.3],     # Market liberal, progressive
+    
+    # Social terms
+    'equality': [-0.5, 0.8, 0.2],      # Social democratic, strongly progressive
+    'justice': [-0.3, 0.6, 0.1],       # Somewhat social democratic, progressive
+    'rights': [0.1, 0.8, 0.1],         # Progressive
+    'freedom': [0.5, 0.7, 0.0],        # Market liberal, progressive
+    'liberty': [0.6, 0.6, 0.0],        # Market liberal, progressive
+    'community': [-0.3, 0.5, 0.3],     # Somewhat social democratic, progressive
+    'welfare': [-0.8, 0.5, 0.0],       # Strongly social democratic, progressive
+    'education': [-0.2, 0.7, 0.2],     # Slightly social democratic, progressive
+    'healthcare': [-0.7, 0.6, 0.1],    # Strongly social democratic, progressive
+    'immigration': [-0.1, 0.8, 0.1],   # Strongly progressive
+    'diversity': [-0.2, 0.9, 0.2],     # Strongly progressive
+    'inclusion': [-0.3, 0.9, 0.2],     # Strongly progressive
+    'tradition': [0.1, -0.8, -0.1],    # Strongly conservative
+    'family': [0.0, -0.5, 0.0],        # Conservative
+    'security': [0.2, -0.4, -0.1],     # Conservative
+    'workers': [-0.8, 0.4, 0.0],       # Strongly social democratic, somewhat progressive
+    'solidarity': [-0.7, 0.5, 0.1],    # Strongly social democratic, progressive
+    'reform': [0.0, 0.6, 0.2],         # Progressive
+    'progress': [0.1, 0.8, 0.3],       # Strongly progressive
+    'individual': [0.7, 0.5, 0.0],     # Market liberal, progressive
+    'privacy': [0.3, 0.7, 0.0],        # Progressive
+    'identity': [0.0, -0.5, 0.0],      # Conservative
+    'sovereignty': [0.2, -0.6, -0.1],  # Conservative
+    'nation': [0.1, -0.7, -0.2],       # Strongly conservative
+    'borders': [0.2, -0.8, -0.1],      # Strongly conservative
+    'culture': [0.0, -0.4, 0.1],       # Somewhat conservative
+    
+    # Ecological terms
+    'climate': [-0.2, 0.5, 0.9],       # Social democratic, progressive, strongly green
+    'environment': [-0.3, 0.4, 0.9],   # Somewhat social democratic, progressive, strongly green
+    'sustainability': [-0.2, 0.5, 0.9], # Social democratic, progressive, strongly green
+    'renewable': [-0.3, 0.4, 0.9],     # Somewhat social democratic, progressive, strongly green
+    'conservation': [-0.1, 0.2, 0.8],   # Green
+    'pollution': [-0.2, 0.3, 0.8],      # Social democratic, somewhat progressive, strongly green
+    'biodiversity': [-0.2, 0.4, 0.9],   # Social democratic, progressive, strongly green
+    'emissions': [-0.2, 0.3, 0.8],      # Social democratic, somewhat progressive, strongly green
+    'green': [-0.3, 0.5, 0.9],         # Somewhat social democratic, progressive, strongly green
+    'energy': [0.0, 0.2, 0.6],         # Somewhat green
+    'resources': [0.0, 0.0, 0.5],      # Somewhat green
+    'recycling': [-0.2, 0.3, 0.8],     # Social democratic, somewhat progressive, strongly green
+    'agriculture': [0.0, -0.1, 0.5],    # Somewhat green
+    'wildlife': [-0.1, 0.3, 0.9],      # Strongly green
+    'protection': [-0.3, 0.2, 0.7],    # Somewhat social democratic, green
+    
+    # Movement-specific terms
+    'christian': [0.2, -0.7, 0.0],      # Conservative
+    'stability': [0.3, -0.3, 0.0],      # Somewhat market liberal, somewhat conservative
+    'nato': [0.3, 0.0, -0.2],          # Somewhat market liberal
+    'socialism': [-0.9, 0.3, 0.2],     # Strongly social democratic
+    'redistribution': [-0.9, 0.4, 0.1], # Strongly social democratic
+    'anti-capitalism': [-0.9, 0.2, 0.3], # Strongly social democratic
+    'public': [-0.7, 0.3, 0.1],        # Strongly social democratic
+    'liberal': [0.7, 0.6, 0.0],        # Market liberal, progressive
+    'euro-skeptic': [0.1, -0.7, -0.1], # Strongly conservative
+    'europe': [0.2, 0.5, 0.3],         # Somewhat market liberal, progressive
+    'integration': [0.0, 0.7, 0.2],    # Progressive
+    'progressive': [0.0, 0.9, 0.3],    # Strongly progressive
+    'digital': [0.4, 0.7, 0.1],        # Somewhat market liberal, progressive
+    'transparency': [0.1, 0.8, 0.2],   # Strongly progressive
+    'mobility': [0.2, 0.6, 0.5],       # Somewhat market liberal, progressive, somewhat green
+    'peace': [-0.2, 0.5, 0.3],         # Somewhat social democratic, progressive
+    'diplomacy': [-0.1, 0.4, 0.2],     # Progressive
+    'dialogue': [0.0, 0.6, 0.1],       # Progressive
+    'pragmatic': [0.3, 0.1, 0.0],      # Somewhat market liberal
+    'future': [0.1, 0.6, 0.5]          # Progressive, somewhat green
+}
+
 def generate_word_cloud(entity_type, entity_name):
     """Generate a sample word cloud for an entity when none exists in the data."""
     word_cloud = {}

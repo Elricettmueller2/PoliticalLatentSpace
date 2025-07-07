@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Political Latent Space</title>
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+        }
+        h1, h2 {
+            text-align: center;
+            padding: 10px;
+            font-weight: 300;
+        }
+        .container {
+            display: flex;
+            flex-direction: row;
+            width: 100%;
+            height: 100vh;
+        }
+        .chart-container {
+            width: 75%;
+            height: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        .sidebar {
+            width: 25%;
+            height: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+            background-color: #222;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .info-panel {
+            background-color: #333;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .info-panel h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #555;
+            padding-bottom: 10px;
+        }
+        .dimension-score {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .dimension-score-bar {
+            height: 8px;
+            background-color: #444;
+            border-radius: 4px;
+            margin-top: 5px;
+            position: relative;
+        }
+        .dimension-score-fill {
+            height: 100%;
+            border-radius: 4px;
+            position: absolute;
+            left: 0;
+        }
+        .word-cloud {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+        }
+        .word-cloud-word {
+            padding: 5px 10px;
+            border-radius: 15px;
+            background-color: #444;
+            display: inline-block;
+            margin: 3px;
+        }
+        .controls {
+            margin-top: auto;
+            padding-top: 20px;
+            border-top: 1px solid #444;
+        }
+        .control-group {
+            margin-bottom: 15px;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        select, button {
+            width: 100%;
+            padding: 8px;
+            background-color: #333;
+            color: #e0e0e0;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+        button {
+            cursor: pointer;
+            margin-top: 10px;
+            background-color: #2a5885;
+        }
+        button:hover {
+            background-color: #3a6fa5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="chart-container">
+            <div id="galaxy-chart" style="width: 100%; height: 100%;"></div>
+        </div>
+        <div class="sidebar">
+            <div class="info-panel" id="entity-info">
+                <h3>Entity Information</h3>
+                <p id="no-selection-message">Select an entity in the visualization to see details.</p>
+                <div id="entity-details" style="display: none;">
+                    <h4 id="entity-name"></h4>
+                    <p id="entity-type"></p>
+                    <h4>Dimension Scores</h4>
+                    <div id="dimension-scores"></div>
+                </div>
+            </div>
+            
+            <div class="info-panel" id="word-cloud-panel" style="display: none;">
+                <h3>Word Cloud</h3>
+                <div id="word-cloud" class="word-cloud"></div>
+            </div>
+            
+            <div class="controls">
+                <div class="control-group">
+                    <label for="movement-filter">Filter by Movement:</label>
+                    <select id="movement-filter">
+                        <option value="all">All Movements</option>
+                        <!-- Will be populated dynamically -->
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label for="dimension-toggle">Toggle Dimension:</label>
+                    <select id="dimension-toggle">
+                        <option value="all">All Dimensions</option>
+                        <!-- Will be populated dynamically -->
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <button id="reset-view">Reset View</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let selectedEntity = null;
+        let movementsList = [];
+        let dimensionsList = [];
+        
+        // --- Initialize Galaxy Visualization ---
+        function loadGalaxyVisualization(entityType = null, entityName = null) {
+            // Build the URL with query parameters if an entity is selected
+            let url = '/api/galaxy-data';
+            if (entityType && entityName) {
+                url += `?entity_type=${entityType}&entity_name=${entityName}`;
+            }
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(fig => {
+                    const galaxyChart = document.getElementById('galaxy-chart');
+                    Plotly.newPlot(galaxyChart, fig.data, fig.layout);
+
+                    // Handle click events on the visualization
+                    galaxyChart.on('plotly_click', function(data) {
+                        if (data.points.length > 0) {
+                            const point = data.points[0];
+                            const pointText = point.text;
+                            
+                            // Determine if this is a movement or politician
+                            let entityType, entityName;
+                            
+                            if (point.data.name === 'Movements') {
+                                entityType = 'movement';
+                                entityName = pointText;
+                            } else {
+                                entityType = 'politician';
+                                entityName = pointText;
+                            }
+                            
+                            // Update selected entity and reload visualization with projection lines
+                            selectedEntity = { type: entityType, name: entityName };
+                            loadGalaxyVisualization(entityType, entityName);
+                            
+                            // Load entity details
+                            loadEntityDetails(entityType, entityName);
+                        }
+                    });
+                });
+        }
+        
+        // --- Load Entity Details ---
+        function loadEntityDetails(entityType, entityName) {
+            fetch(`/api/entity-info?entity_type=${entityType}&entity_name=${entityName}`)
+                .then(response => response.json())
+                .then(data => {
+                    // Show entity details panel
+                    document.getElementById('no-selection-message').style.display = 'none';
+                    document.getElementById('entity-details').style.display = 'block';
+                    
+                    // Update entity info
+                    document.getElementById('entity-name').textContent = data.name;
+                    document.getElementById('entity-type').textContent = 
+                        data.type === 'movement' ? 'Political Movement' : 'Politician';
+                    
+                    // Update dimension scores
+                    const dimensionScoresContainer = document.getElementById('dimension-scores');
+                    dimensionScoresContainer.innerHTML = '';
+                    
+                    for (const [dimension, score] of Object.entries(data.dimension_scores)) {
+                        const dimensionElement = document.createElement('div');
+                        dimensionElement.className = 'dimension-score';
+                        
+                        const dimensionName = document.createElement('span');
+                        dimensionName.textContent = dimension.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+                        
+                        const dimensionValue = document.createElement('span');
+                        dimensionValue.textContent = score.toFixed(2);
+                        
+                        dimensionElement.appendChild(dimensionName);
+                        dimensionElement.appendChild(dimensionValue);
+                        
+                        const barContainer = document.createElement('div');
+                        barContainer.className = 'dimension-score-bar';
+                        barContainer.style.width = '100%';
+                        
+                        const barFill = document.createElement('div');
+                        barFill.className = 'dimension-score-fill';
+                        barFill.style.width = `${score * 100}%`;
+                        
+                        // Color based on dimension
+                        let color = '#888';
+                        if (dimension === 'economic_axis') color = 'rgba(255, 165, 0, 0.8)';
+                        if (dimension === 'social_axis') color = 'rgba(65, 105, 225, 0.8)';
+                        if (dimension === 'ecological_axis') color = 'rgba(50, 205, 50, 0.8)';
+                        barFill.style.backgroundColor = color;
+                        
+                        barContainer.appendChild(barFill);
+                        dimensionElement.appendChild(barContainer);
+                        
+                        dimensionScoresContainer.appendChild(dimensionElement);
+                    }
+                    
+                    // Update word cloud
+                    updateWordCloud(data.word_cloud);
+                });
+        }
+        
+        // --- Update Word Cloud ---
+        function updateWordCloud(wordCloudData) {
+            const wordCloudContainer = document.getElementById('word-cloud');
+            wordCloudContainer.innerHTML = '';
+            
+            // Show word cloud panel
+            document.getElementById('word-cloud-panel').style.display = 'block';
+            
+            // Check if we have word cloud data
+            if (!wordCloudData || Object.keys(wordCloudData).length === 0) {
+                wordCloudContainer.innerHTML = '<p>No word cloud data available</p>';
+                return;
+            }
+            
+            // Sort words by weight
+            const words = Object.entries(wordCloudData)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 20); // Show top 20 words
+            
+            // Find max weight for scaling
+            const maxWeight = Math.max(...words.map(w => w[1]));
+            
+            // Create word cloud
+            words.forEach(([word, weight]) => {
+                const wordElement = document.createElement('span');
+                wordElement.className = 'word-cloud-word';
+                wordElement.textContent = word;
+                
+                // Scale font size based on weight
+                const fontSize = 12 + (weight / maxWeight) * 16;
+                wordElement.style.fontSize = `${fontSize}px`;
+                
+                // Add to container
+                wordCloudContainer.appendChild(wordElement);
+            });
+        }
+        
+        // --- Initialize Controls ---
+        function initializeControls() {
+            // Reset view button
+            document.getElementById('reset-view').addEventListener('click', function() {
+                selectedEntity = null;
+                loadGalaxyVisualization();
+                
+                // Reset entity info panel
+                document.getElementById('no-selection-message').style.display = 'block';
+                document.getElementById('entity-details').style.display = 'none';
+                document.getElementById('word-cloud-panel').style.display = 'none';
+            });
+            
+            // TODO: Populate movement and dimension dropdowns
+            // This will be implemented in the next phase
+        }
+        
+        // --- Initialize Application ---
+        document.addEventListener('DOMContentLoaded', function() {
+            loadGalaxyVisualization();
+            initializeControls();
+        });
+    </script>
+</body>
+</html>

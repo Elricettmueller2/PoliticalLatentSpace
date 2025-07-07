@@ -144,10 +144,17 @@ class PoliticalLatentSpace:
         
         try:
             if method.lower() == 'umap':
+                # Parameters optimized for political text analysis:
+                # - Higher n_neighbors preserves more global structure (political landscape)
+                # - Lower min_dist creates tighter clusters of similar political entities
+                # - Cosine metric is best for text embeddings
                 self.dimension_reducer = umap.UMAP(
-                    n_components=n_components, 
+                    n_components=n_components,
+                    n_neighbors=30,       # Higher value (default is 15) for better global structure
+                    min_dist=0.1,         # Lower value (default is 0.1) for tighter clusters
+                    metric='cosine',
                     random_state=random_state,
-                    metric='cosine'
+                    low_memory=True       # More memory efficient for large datasets
                 )
             elif method.lower() == 'tsne':
                 self.dimension_reducer = TSNE(
@@ -243,6 +250,33 @@ class PoliticalLatentSpace:
         
         return comparison
     
+    def position_on_axis(self, text: str, positive_anchor: str, negative_anchor: str) -> float:
+        """
+        Position a text on a custom axis defined by two anchor points.
+        
+        Args:
+            text: Text to position
+            positive_anchor: Text defining the positive end of the axis
+            negative_anchor: Text defining the negative end of the axis
+            
+        Returns:
+            Position on axis from -1.0 to 1.0 (0.0 is neutral)
+        """
+        # Generate embeddings
+        text_embedding = self.embedder.encode(text)
+        pos_embedding = self.embedder.encode(positive_anchor)
+        neg_embedding = self.embedder.encode(negative_anchor)
+        
+        # Calculate similarities
+        pos_sim = float(cosine_similarity([text_embedding], [pos_embedding])[0][0])
+        neg_sim = float(cosine_similarity([text_embedding], [neg_embedding])[0][0])
+        
+        # Calculate position (normalized to -1 to 1 range)
+        # Higher value means closer to positive anchor
+        position = pos_sim - neg_sim
+        
+        return position
+    
     def get_nearest_texts(self, text: str, top_n: int = 5) -> List[Dict[str, Any]]:
         """
         Find the nearest texts in the corpus to the given text.
@@ -273,5 +307,100 @@ class PoliticalLatentSpace:
                 "label": self.corpus_labels[i],
                 "similarity": float(similarities[i])
             })
+        
+        return results
+    
+    def evaluate_learned_dimensions(self, test_texts: Dict[str, str], 
+                                  known_groups: Dict[str, List[str]]) -> Dict[str, Any]:
+        """
+        Evaluate how well the learned dimensions separate known political groups.
+        
+        Args:
+            test_texts: Dictionary mapping entity names to their texts
+            known_groups: Dictionary mapping group names to lists of entity names
+                e.g., {'left_wing': ['spd', 'linke'], 'right_wing': ['cdu', 'afd']}
+            
+        Returns:
+            Evaluation metrics including separation ratio and quality assessment
+        """
+        results = {}
+        
+        # Position all test texts
+        positions = {}
+        for name, text in test_texts.items():
+            pos = self.position_text(text)
+            if 'learned_dimensions' in pos:
+                positions[name] = pos['learned_dimensions']
+        
+        if not positions:
+            return {"error": "No learned dimensions available or no positions could be calculated"}
+        
+        # Calculate in-group vs. out-group distances
+        in_group_distances = []
+        out_group_distances = []
+        
+        for group_name, members in known_groups.items():
+            # Get positions for group members
+            group_positions = [positions[m] for m in members if m in positions]
+            if len(group_positions) < 2:
+                continue
+                
+            # Calculate in-group distances
+            for i in range(len(group_positions)):
+                for j in range(i+1, len(group_positions)):
+                    pos1 = np.array(list(group_positions[i].values()))
+                    pos2 = np.array(list(group_positions[j].values()))
+                    dist = np.linalg.norm(pos1 - pos2)
+                    in_group_distances.append(dist)
+            
+            # Calculate out-group distances
+            other_members = [m for m in positions.keys() if m not in members]
+            other_positions = [positions[m] for m in other_members if m in positions]
+            
+            for group_pos in group_positions:
+                for other_pos in other_positions:
+                    pos1 = np.array(list(group_pos.values()))
+                    pos2 = np.array(list(other_pos.values()))
+                    dist = np.linalg.norm(pos1 - pos2)
+                    out_group_distances.append(dist)
+        
+        # Calculate metrics
+        if in_group_distances and out_group_distances:
+            avg_in_group = sum(in_group_distances) / len(in_group_distances)
+            avg_out_group = sum(out_group_distances) / len(out_group_distances)
+            separation_ratio = avg_out_group / avg_in_group
+            
+            results["avg_in_group_distance"] = avg_in_group
+            results["avg_out_group_distance"] = avg_out_group
+            results["separation_ratio"] = separation_ratio
+            results["quality"] = "good" if separation_ratio > 1.5 else "fair" if separation_ratio > 1.2 else "poor"
+            
+            # Calculate per-group metrics
+            group_metrics = {}
+            for group_name, members in known_groups.items():
+                valid_members = [m for m in members if m in positions]
+                if len(valid_members) < 2:
+                    continue
+                    
+                group_positions = [positions[m] for m in valid_members]
+                
+                # Calculate cohesion (average distance between members)
+                distances = []
+                for i in range(len(group_positions)):
+                    for j in range(i+1, len(group_positions)):
+                        pos1 = np.array(list(group_positions[i].values()))
+                        pos2 = np.array(list(group_positions[j].values()))
+                        dist = np.linalg.norm(pos1 - pos2)
+                        distances.append(dist)
+                
+                avg_distance = sum(distances) / len(distances) if distances else 0
+                group_metrics[group_name] = {
+                    "cohesion": avg_distance,
+                    "member_count": len(valid_members)
+                }
+            
+            results["group_metrics"] = group_metrics
+        else:
+            results["error"] = "Insufficient data to calculate metrics"
         
         return results

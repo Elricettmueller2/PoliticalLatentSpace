@@ -14,12 +14,15 @@ class EnhancedEmbedder:
     and text segmentation for long documents.
     """
     
-    def __init__(self, model_name='distiluse-base-multilingual-cased-v2', batch_size=32):
+    def __init__(self, model_name='paraphrase-multilingual-MiniLM-L12-v2', batch_size=32):
         """
         Initialize the embedder with a specific model.
         
         Args:
             model_name: Name of the sentence-transformers model to use
+                Default is 'paraphrase-multilingual-MiniLM-L12-v2' which is smaller and faster
+                than 'distiluse-base-multilingual-cased-v2' while maintaining good quality for
+                multilingual text analysis.
             batch_size: Batch size for efficient processing
         """
         self.model = SentenceTransformer(model_name)
@@ -117,5 +120,29 @@ class EnhancedEmbedder:
         return {
             "name": self.model_name,
             "dimension": self.model.get_sentence_embedding_dimension(),
-            "batch_size": self.batch_size
+            "batch_size": self.batch_size,
+            "model_size_mb": self._estimate_model_size()
         }
+        
+    def _estimate_model_size(self) -> float:
+        """
+        Estimate the size of the model in MB based on parameters.
+        
+        Returns:
+            Estimated model size in MB
+        """
+        import torch
+        
+        # Count parameters in the model
+        param_size = 0
+        for param in self.model.parameters():
+            param_size += param.nelement() * param.element_size()
+        
+        # Convert to MB
+        buffer_size = 0
+        for buffer in self.model.buffers():
+            buffer_size += buffer.nelement() * buffer.element_size()
+        
+        size_mb = (param_size + buffer_size) / (1024 * 1024)
+        
+        return round(size_mb, 2)

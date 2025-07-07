@@ -1,0 +1,35 @@
+# Political Latent Space Generator Configuration
+
+# Embedding settings
+embedding:
+  model_name: 'distiluse-base-multilingual-cased-v2'
+  batch_size: 32
+
+# Analysis settings
+analysis:
+  window_sizes: [200, 500, 1000]
+  top_terms: 20
+
+# Data settings
+data:
+  base_dir: 'c:/Users/elric/CascadeProjects/Uni/PoliticalLatentSpace/src/data/raw'
+  processed_dir: 'c:/Users/elric/CascadeProjects/Uni/PoliticalLatentSpace/src/data/processed'
+
+# Latent space settings
+latent_space:
+  anchors:
+    economic_left: "Wir setzen uns für staatliche Regulierung, Umverteilung und soziale Absicherung ein."
+    economic_right: "Wir fördern freie Märkte, niedrige Steuern und unternehmerische Freiheit."
+    progressive: "Wir stehen für gesellschaftlichen Wandel, Diversität und neue Lebensformen."
+    conservative: "Wir bewahren Traditionen, Familie und kulturelle Identität."
+    ecological: "Klimaschutz und Umweltschutz haben für uns höchste Priorität."
+    growth: "Wirtschaftswachstum und Wohlstand sind entscheidend."
+    nationalist: "Nationale Souveränität und Identität müssen geschützt werden."
+    internationalist: "Internationale Zusammenarbeit und globale Lösungen sind entscheidend."
+  n_components: 4
+  method: 'umap'
+
+# Output settings
+output:
+  dir: 'c:/Users/elric/CascadeProjects/Uni/PoliticalLatentSpace/src/data/processed'
+  filename: 'political_latent_space.json'
