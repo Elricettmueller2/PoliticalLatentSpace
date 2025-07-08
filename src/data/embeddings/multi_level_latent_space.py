@@ -345,6 +345,9 @@ class MultiLevelLatentSpace:
             max_similarity = max(max_similarity, similarity)
             min_similarity = min(min_similarity, similarity)
         
+        # Normalize values to ensure better distribution
+        similarity_range = max_similarity - min_similarity
+        
         # Second pass to create word cloud data with normalized values
         for w in filtered_words:
             similarity = 1.0 - (w['distance'] / max_distance)
