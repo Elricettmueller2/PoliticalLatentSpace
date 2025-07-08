@@ -64,11 +64,22 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
     random.seed(random_seed)
 
     # --- Data Extraction ---
-    movement_embeddings = [d['embedding'] for d in data['movements'].values() if 'embedding' in d]
-    movement_names = [name for name, d in data['movements'].items() if 'embedding' in d]
-    politician_embeddings = [d['embedding'] for d in data.get('politicians', {}).values() if 'embedding' in d]
-    politician_names = [name for name, d in data.get('politicians', {}).items() if 'embedding' in d]
-    politician_movements = [d.get('movement', 'Unknown') for d in data.get('politicians', {}).values() if 'embedding' in d]
+    # Handle the case when 'movements' key is missing
+    movements_data = data.get('movements', {})
+    if not movements_data and 'entities' in data and 'movements' in data['entities']:
+        movements_data = data['entities']['movements']
+    
+    movement_embeddings = [d['embedding'] for d in movements_data.values() if 'embedding' in d]
+    movement_names = [name for name, d in movements_data.items() if 'embedding' in d]
+    
+    # Handle politicians data similarly
+    politicians_data = data.get('politicians', {})
+    if not politicians_data and 'entities' in data and 'politicians' in data['entities']:
+        politicians_data = data['entities']['politicians']
+    
+    politician_embeddings = [d['embedding'] for d in politicians_data.values() if 'embedding' in d]
+    politician_names = [name for name, d in politicians_data.items() if 'embedding' in d]
+    politician_movements = [d.get('movement', 'Unknown') for d in politicians_data.values() if 'embedding' in d]
 
     # --- Standardize and Reduce Dimensionality ---
     # Combine all embeddings for standardization

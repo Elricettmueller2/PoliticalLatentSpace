@@ -2,20 +2,98 @@ from flask import Flask, render_template, jsonify, request
 import json
 import plotly
 import random
+import os
+import numpy as np
+from pathlib import Path
 
-# Import your visualization functions
-from prototypes.galaxy_visualization import create_galaxy_visualization, load_data
+# Import visualization and latent space functions
+from prototypes.galaxy_visualization import create_galaxy_visualization
+from src.data.embeddings.multi_level_latent_space import MultiLevelLatentSpace
 
 app = Flask(__name__)
 
 # --- Data Loading and Pre-computation ---
-# Load data once at startup to avoid file I/O on every request
 print("Loading and processing data...")
 DATA_PATH = 'src/data/processed/political_latent_space.json'
-DATA = load_data(DATA_PATH)
+TEST_EMBEDDING_PATH = 'src/data/embeddings/test_embeddings.h5'
+FULL_EMBEDDING_PATH = 'src/data/embeddings/full_embeddings.h5'
 
-# We'll generate the visualization on demand now to support entity selection
-print("Data loaded successfully.")
+# Initialize the hybrid latent space
+LATENT_SPACE = None
+
+# Try to load the hybrid latent space with full embeddings
+if os.path.exists(FULL_EMBEDDING_PATH) and os.path.exists(DATA_PATH):
+    try:
+        print(f"Loading hybrid latent space with full embeddings from {FULL_EMBEDDING_PATH}...")
+        LATENT_SPACE = MultiLevelLatentSpace(
+            entity_data_path=DATA_PATH,
+            word_embedding_path=FULL_EMBEDDING_PATH,
+            verbose=True
+        )
+        print("Hybrid latent space loaded successfully with full embeddings.")
+    except Exception as e:
+        print(f"Error loading hybrid latent space with full embeddings: {e}")
+        LATENT_SPACE = None
+
+# Try with test embeddings if full embeddings failed
+if LATENT_SPACE is None and os.path.exists(TEST_EMBEDDING_PATH) and os.path.exists(DATA_PATH):
+    try:
+        print(f"Loading hybrid latent space with test embeddings from {TEST_EMBEDDING_PATH}...")
+        LATENT_SPACE = MultiLevelLatentSpace(
+            entity_data_path=DATA_PATH,
+            word_embedding_path=TEST_EMBEDDING_PATH,
+            verbose=True
+        )
+        print("Hybrid latent space loaded successfully with test embeddings.")
+    except Exception as e:
+        print(f"Error loading hybrid latent space with test embeddings: {e}")
+        print("Word-level embedding features will be disabled.")
+
+# Fall back to entity-only mode if no embeddings are available
+if LATENT_SPACE is None:
+    try:
+        print("WARNING: No embedding files found. Loading in entity-only mode.")
+        LATENT_SPACE = MultiLevelLatentSpace(
+            entity_data_path=DATA_PATH,
+            verbose=True
+        )
+        print("Loaded in entity-only mode. Hybrid visualization will be disabled.")
+    except Exception as e:
+        print(f"Error loading in entity-only mode: {e}")
+        print("Application may not function correctly.")
+
+# Extract entity data for backward compatibility
+if LATENT_SPACE and hasattr(LATENT_SPACE, 'entity_data'):
+    # Make sure the DATA structure matches what create_galaxy_visualization expects
+    DATA = LATENT_SPACE.entity_data if LATENT_SPACE else {}
+    
+    # Ensure DATA has the expected structure with both direct access and nested entities format
+    # This makes the data structure compatible with both old and new code
+    if 'movements' not in DATA:
+        if 'entities' in DATA and 'movements' in DATA['entities']:
+            # Extract from nested structure
+            DATA['movements'] = DATA['entities']['movements']
+        else:
+            # Create empty dict if not found
+            DATA['movements'] = {}
+            
+    if 'politicians' not in DATA:
+        if 'entities' in DATA and 'politicians' in DATA['entities']:
+            # Extract from nested structure
+            DATA['politicians'] = DATA['entities']['politicians']
+        else:
+            # Create empty dict if not found
+            DATA['politicians'] = {}
+            
+    if 'embeddings' not in DATA:
+        DATA['embeddings'] = {}
+else:
+    DATA = {'movements': {}, 'politicians': {}, 'embeddings': {}}
+    
+EMBEDDING_STORE = LATENT_SPACE.word_embedding_store if LATENT_SPACE else None
+
+print("Data loading complete.")
+
 
 # --- Routes ---
 
@@ -35,11 +113,72 @@ def get_galaxy_data():
     if entity_type and entity_name:
         selected_entity = {'type': entity_type, 'name': entity_name}
     
-    # Generate the visualization with the selected entity
-    galaxy_fig = create_galaxy_visualization(DATA, selected_entity=selected_entity)
-    
-    # Use Plotly's JSON encoder to serialize the figure
-    return json.dumps(galaxy_fig, cls=plotly.utils.PlotlyJSONEncoder)
+    try:
+        # Check data structure integrity first
+        if 'movements' not in DATA:
+            print("Warning: 'movements' key not found in DATA. Available keys:", list(DATA.keys()))
+            if 'entities' in DATA and 'movements' in DATA['entities']:
+                print("Found movements in nested 'entities' structure")
+                DATA['movements'] = DATA['entities']['movements']
+            else:
+                print("Creating empty movements dictionary")
+                DATA['movements'] = {}
+        
+        # Check if we have the new hybrid visualization capability
+        if LATENT_SPACE and hasattr(LATENT_SPACE, 'get_hybrid_visualization_data'):
+            try:
+                # Use the hybrid visualization data directly
+                hybrid_data = LATENT_SPACE.get_hybrid_visualization_data(
+                    entity_type=entity_type,
+                    entity_name=entity_name,
+                    num_words=0  # Don't include words in the basic galaxy view
+                )
+                # Convert to Plotly format if needed
+                if isinstance(hybrid_data, dict) and not isinstance(hybrid_data, str):
+                    # If it's already in Plotly format, use it directly
+                    if 'data' in hybrid_data:
+                        galaxy_fig = hybrid_data
+                    else:
+                        # Otherwise, generate the visualization with the selected entity
+                        galaxy_fig = create_galaxy_visualization(DATA, selected_entity=selected_entity)
+                else:
+                    # If it's a string or other format, use it directly
+                    return hybrid_data
+            except Exception as e:
+                print(f"Error in hybrid visualization: {e}")
+                # Fall back to the old visualization
+                galaxy_fig = create_galaxy_visualization(DATA, selected_entity=selected_entity)
+        else:
+            # Fall back to the old visualization
+            galaxy_fig = create_galaxy_visualization(DATA, selected_entity=selected_entity)
+            
+        # Use Plotly's JSON encoder to serialize the figure
+        return json.dumps(galaxy_fig, cls=plotly.utils.PlotlyJSONEncoder)
+        
+    except Exception as e:
+        print(f"Error generating galaxy visualization: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Return a valid JSON error response instead of throwing a 500
+        error_response = {
+            'error': True,
+            'message': f"Failed to generate visualization: {str(e)}",
+            'data': [],
+            'layout': {
+                'title': 'Error: Could not load visualization',
+                'annotations': [{
+                    'text': f"Error: {str(e)}",
+                    'showarrow': False,
+                    'font': {'size': 16, 'color': 'red'},
+                    'xref': 'paper',
+                    'yref': 'paper',
+                    'x': 0.5,
+                    'y': 0.5
+                }]
+            }
+        }
+        return jsonify(error_response)
 
 # Dictionary of political terms for generating sample word clouds
 POLITICAL_TERMS = {
@@ -216,6 +355,237 @@ def get_entity_info():
     
     return jsonify(result)
 
+@app.route('/api/word-embeddings/nearest')
+def get_nearest_words():
+    """
+    Find words closest to a given entity or embedding vector.
+    
+    Query parameters:
+    - entity_type: Type of entity (party, politician)
+    - entity_name: Name of entity
+    - embedding: JSON array of embedding vector (alternative to entity)
+    - top_n: Number of words to return (default: 50)
+    - max_distance: Maximum distance threshold (default: 0.5)
+    """
+    if EMBEDDING_STORE is None:
+        return jsonify({
+            'error': 'Word embedding store not available',
+            'message': 'Embeddings have not been loaded. Please check server configuration.'
+        }), 503
+    
+    # Get query parameters
+    entity_type = request.args.get('entity_type')
+    entity_name = request.args.get('entity_name')
+    embedding_json = request.args.get('embedding')
+    top_n = int(request.args.get('top_n', 50))
+    max_distance = float(request.args.get('max_distance', 0.5))
+    
+    # Get embedding vector
+    query_embedding = None
+    
+    if embedding_json:
+        # Use provided embedding vector
+        try:
+            query_embedding = json.loads(embedding_json)
+        except json.JSONDecodeError:
+            return jsonify({
+                'error': 'Invalid embedding format',
+                'message': 'Embedding must be a valid JSON array'
+            }), 400
+    elif entity_type and entity_name:
+        # Get embedding for entity
+        entity_key = f"{entity_type}:{entity_name}"
+        if entity_key in DATA['embeddings']:
+            query_embedding = DATA['embeddings'][entity_key]
+        else:
+            return jsonify({
+                'error': 'Entity not found',
+                'message': f'No embedding found for {entity_type} {entity_name}'
+            }), 404
+    else:
+        return jsonify({
+            'error': 'Missing parameters',
+            'message': 'Either embedding or entity_type+entity_name must be provided'
+        }), 400
+    
+    # Find nearest words
+    nearest_words = EMBEDDING_STORE.get_nearest_words(
+        query_embedding, 
+        top_n=top_n,
+        max_distance=max_distance
+    )
+    
+    return jsonify({
+        'query': {
+            'entity_type': entity_type,
+            'entity_name': entity_name,
+            'top_n': top_n,
+            'max_distance': max_distance
+        },
+        'nearest_words': nearest_words
+    })
+
+@app.route('/api/hybrid-visualization')
+def get_hybrid_visualization():
+    """
+    Generate a hybrid visualization combining entity-level and word-level data.
+    
+    Query parameters:
+    - entity_type: Type of entity to focus on (movement, politician)
+    - entity_name: Name of entity to focus on
+    - num_words: Number of words to include (default: 100)
+    - max_distance: Maximum distance for word inclusion (default: 0.5)
+    """
+    if LATENT_SPACE is None or LATENT_SPACE.word_embedding_store is None:
+        return jsonify({
+            'error': 'Hybrid latent space not available',
+            'message': 'The hybrid latent space has not been properly initialized. Please check server configuration.'
+        }), 503
+    
+    # Get query parameters
+    entity_type = request.args.get('entity_type', 'movement')
+    entity_name = request.args.get('entity_name')
+    num_words = int(request.args.get('num_words', 100))
+    max_distance = float(request.args.get('max_distance', 0.5))
+    
+    # Create base visualization with entities
+    selected_entity = None
+    if entity_type and entity_name:
+        selected_entity = {'type': entity_type, 'name': entity_name}
+    
+    # Generate the hybrid visualization directly from the latent space
+    try:
+        # Get the hybrid visualization data
+        hybrid_data = LATENT_SPACE.get_hybrid_visualization_data(
+            entity_type=entity_type,
+            entity_name=entity_name,
+            num_words=num_words,
+            max_distance=max_distance
+        )
+        
+        # If the latent space doesn't have the hybrid visualization method,
+        # fall back to the old approach
+        if hybrid_data is None:
+            # Generate the entity visualization
+            galaxy_fig = create_galaxy_visualization(DATA, selected_entity=selected_entity)
+            
+            # If entity is specified, add word-level data
+            if entity_type and entity_name:
+                entity_key = f"{entity_type}:{entity_name}"
+                if 'embeddings' in DATA and entity_key in DATA['embeddings']:
+                    # Get entity embedding
+                    query_embedding = DATA['embeddings'][entity_key]
+                    
+                    # Find nearest words
+                    nearest_words = EMBEDDING_STORE.get_nearest_words(
+                        query_embedding, 
+                        top_n=num_words,
+                        max_distance=max_distance
+                    )
+                    
+                    # Extract word data for visualization
+                    words = [w['word'] for w in nearest_words]
+                    distances = [w['distance'] for w in nearest_words]
+                    
+                    # Add word trace to visualization
+                    if 'data' in galaxy_fig:
+                        word_trace = {
+                            'x': [w['position'][0] if 'position' in w and isinstance(w['position'], list) else 0 for w in nearest_words],
+                            'y': [w['position'][1] if 'position' in w and isinstance(w['position'], list) and len(w['position']) > 1 else 0 for w in nearest_words],
+                            'z': [w['position'][2] if 'position' in w and isinstance(w['position'], list) and len(w['position']) > 2 else 0 for w in nearest_words],
+                            'text': words,
+                            'mode': 'markers+text',
+                            'marker': {
+                                'size': [10 * (1 - d) for d in distances],  # Size inversely proportional to distance
+                                'color': 'rgba(100, 100, 255, 0.7)',
+                                'line': {'width': 1, 'color': 'white'}
+                            },
+                            'textfont': {
+                                'size': 8,
+                                'color': 'rgba(100, 100, 255, 1)'
+                            },
+                            'name': 'Related Words',
+                            'hoverinfo': 'text',
+                            'hovertext': [f"{w}: {d:.3f}" for w, d in zip(words, distances)]
+                        }
+                        galaxy_fig['data'].append(word_trace)
+            
+            # Convert to JSON
+            return json.dumps(galaxy_fig, cls=plotly.utils.PlotlyJSONEncoder)
+        else:
+            # Convert the hybrid data to JSON
+            return json.dumps(hybrid_data, cls=plotly.utils.PlotlyJSONEncoder)
+            
+    except Exception as e:
+        print(f"Error generating hybrid visualization: {e}")
+        return jsonify({
+            'error': 'Failed to generate hybrid visualization',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/word-cloud/entity')
+def get_entity_word_cloud():
+    """
+    Generate a word cloud for a specific entity based on nearby words in the embedding space.
+    
+    Query parameters:
+    - entity_type: Type of entity (party, politician)
+    - entity_name: Name of entity
+    - top_n: Number of words to include (default: 100)
+    - max_distance: Maximum distance threshold (default: 0.5)
+    """
+    if EMBEDDING_STORE is None:
+        return jsonify({
+            'error': 'Word embedding store not available',
+            'message': 'Embeddings have not been loaded. Please check server configuration.'
+        }), 503
+    
+    # Get query parameters
+    entity_type = request.args.get('entity_type')
+    entity_name = request.args.get('entity_name')
+    top_n = int(request.args.get('top_n', 100))
+    max_distance = float(request.args.get('max_distance', 0.5))
+    
+    if not entity_type or not entity_name:
+        return jsonify({
+            'error': 'Missing parameters',
+            'message': 'Both entity_type and entity_name must be provided'
+        }), 400
+    
+    # Get entity embedding
+    entity_key = f"{entity_type}:{entity_name}"
+    if entity_key not in DATA['embeddings']:
+        return jsonify({
+            'error': 'Entity not found',
+            'message': f'No embedding found for {entity_type} {entity_name}'
+        }), 404
+    
+    query_embedding = DATA['embeddings'][entity_key]
+    
+    # Find nearest words
+    nearest_words = EMBEDDING_STORE.get_nearest_words(
+        query_embedding, 
+        top_n=top_n,
+        max_distance=max_distance
+    )
+    
+    # Format for word cloud
+    word_cloud_data = [
+        {
+            'text': w['word'],
+            'value': 1.0 - w['distance'],  # Convert distance to similarity
+            'distance': w['distance']
+        }
+        for w in nearest_words
+    ]
+    
+    return jsonify({
+        'entity': {
+            'type': entity_type,
+            'name': entity_name
+        },
+        'word_cloud': word_cloud_data
+    })
 
 if __name__ == '__main__':
     app.run(debug=True)

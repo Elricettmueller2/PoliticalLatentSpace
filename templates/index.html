@@ -82,19 +82,60 @@
             background-color: #444;
             display: inline-block;
             margin: 3px;
+            cursor: pointer;
+            transition: background-color 0.2s;
         }
-        .controls {
-            margin-top: auto;
-            padding-top: 20px;
-            border-top: 1px solid #444;
+        .word-cloud-word:hover {
+            background-color: #555;
         }
-        .control-group {
+        .embedding-explorer {
+            margin-top: 15px;
+        }
+        .embedding-explorer h4 {
+            margin-bottom: 10px;
+        }
+        .related-words {
+            max-height: 200px;
+            overflow-y: auto;
+            background-color: #2a2a2a;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        .related-word {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-bottom: 4px;
+            cursor: pointer;
+        }
+        .related-word:hover {
+            background-color: #3a3a3a;
+        }
+        .visualization-toggle {
+            display: flex;
             margin-bottom: 15px;
         }
-        .control-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
+        .visualization-toggle button {
+            flex: 1;
+            margin: 0 5px;
+        }
+        .visualization-toggle button.active {
+            background-color: #3a6fa5;
+        }
+        .loading-indicator {
+            text-align: center;
+            padding: 20px;
+            display: none;
+        }
+        .loading-indicator::after {
+            content: "Loading...";
+            animation: ellipsis 1.5s infinite;
+        }
+        @keyframes ellipsis {
+            0% { content: "Loading."; }
+            33% { content: "Loading.."; }
+            66% { content: "Loading..."; }
         }
         select, button {
             width: 100%;
@@ -118,6 +159,7 @@
     <div class="container">
         <div class="chart-container">
             <div id="galaxy-chart" style="width: 100%; height: 100%;"></div>
+            <div id="loading-visualization" class="loading-indicator"></div>
         </div>
         <div class="sidebar">
             <div class="info-panel" id="entity-info">
@@ -136,21 +178,32 @@
                 <div id="word-cloud" class="word-cloud"></div>
             </div>
             
+            <div class="info-panel" id="embedding-explorer-panel" style="display: none;">
+                <h3>Embedding Explorer</h3>
+                <div class="embedding-explorer">
+                    <h4>Related Words</h4>
+                    <div id="related-words" class="related-words"></div>
+                </div>
+            </div>
+            
             <div class="controls">
+                <div class="visualization-toggle">
+                    <button id="standard-view" class="active">Standard View</button>
+                    <button id="hybrid-view">Hybrid View</button>
+                </div>
+                
                 <div class="control-group">
                     <label for="movement-filter">Filter by Movement:</label>
                     <select id="movement-filter">
-                        <option value="all">All Movements</option>
+                        <option value="">All Movements</option>
                         <!-- Will be populated dynamically -->
                     </select>
                 </div>
                 
                 <div class="control-group">
-                    <label for="dimension-toggle">Toggle Dimension:</label>
-                    <select id="dimension-toggle">
-                        <option value="all">All Dimensions</option>
-                        <!-- Will be populated dynamically -->
-                    </select>
+                    <label for="word-count">Word Count:</label>
+                    <input type="range" id="word-count" min="10" max="200" value="50" step="10">
+                    <span id="word-count-value">50</span>
                 </div>
                 
                 <div class="control-group">
@@ -165,73 +218,103 @@
         let selectedEntity = null;
         let movementsList = [];
         let dimensionsList = [];
+        let currentVisualizationType = 'standard'; // 'standard' or 'hybrid'
+        let wordCount = 50;
         
         // --- Initialize Galaxy Visualization ---
         function loadGalaxyVisualization(entityType = null, entityName = null) {
-            // Build the URL with query parameters if an entity is selected
+            // Show loading indicator
+            document.getElementById('loading-visualization').style.display = 'block';
+            
+            // Build URL with parameters
             let url = '/api/galaxy-data';
+            const params = new URLSearchParams();
+            
             if (entityType && entityName) {
-                url += `?entity_type=${entityType}&entity_name=${entityName}`;
+                params.append('entity_type', entityType);
+                params.append('entity_name', entityName);
+                selectedEntity = { type: entityType, name: entityName };
+            } else {
+                selectedEntity = null;
             }
             
+            if (params.toString()) {
+                url += '?' + params.toString();
+            }
+            
+            // Use the appropriate endpoint based on visualization type
+            if (currentVisualizationType === 'hybrid' && selectedEntity) {
+                url = `/api/hybrid-visualization?entity_type=${entityType}&entity_name=${entityName}&num_words=${wordCount}`;
+            }
+            
+            // Fetch data and create visualization
             fetch(url)
                 .then(response => response.json())
-                .then(fig => {
-                    const galaxyChart = document.getElementById('galaxy-chart');
-                    Plotly.newPlot(galaxyChart, fig.data, fig.layout);
-
-                    // Handle click events on the visualization
-                    galaxyChart.on('plotly_click', function(data) {
-                        if (data.points.length > 0) {
-                            const point = data.points[0];
-                            const pointText = point.text;
+                .then(figure => {
+                    Plotly.newPlot('galaxy-chart', figure.data, figure.layout, {responsive: true});
+                    
+                    // Hide loading indicator
+                    document.getElementById('loading-visualization').style.display = 'none';
+                    
+                    // Set up click event for the plot
+                    document.getElementById('galaxy-chart').on('plotly_click', function(data) {
+                        const point = data.points[0];
+                        const pointData = point.data;
+                        
+                        // Check if this is an entity point (not a word)
+                        if (pointData.name && (pointData.name.includes('Parties') || pointData.name.includes('Politicians'))) {
+                            const entityType = pointData.name.includes('Parties') ? 'party' : 'politician';
+                            const entityName = point.text;
                             
-                            // Determine if this is a movement or politician
-                            let entityType, entityName;
-                            
-                            if (point.data.name === 'Movements') {
-                                entityType = 'movement';
-                                entityName = pointText;
-                            } else {
-                                entityType = 'politician';
-                                entityName = pointText;
-                            }
-                            
-                            // Update selected entity and reload visualization with projection lines
+                            // Update selected entity
                             selectedEntity = { type: entityType, name: entityName };
-                            loadGalaxyVisualization(entityType, entityName);
                             
                             // Load entity details
                             loadEntityDetails(entityType, entityName);
+                            
+                            // Reload visualization with selected entity
+                            loadGalaxyVisualization(entityType, entityName);
+                        } 
+                        // Check if this is a word point
+                        else if (pointData.name === 'Related Words') {
+                            const word = point.text;
+                            // Show word details
+                            showWordDetails(word);
                         }
                     });
+                })
+                .catch(error => {
+                    console.error('Error loading visualization:', error);
+                    document.getElementById('loading-visualization').style.display = 'none';
                 });
         }
         
         // --- Load Entity Details ---
         function loadEntityDetails(entityType, entityName) {
+            // Show entity details and hide no selection message
+            document.getElementById('no-selection-message').style.display = 'none';
+            document.getElementById('entity-details').style.display = 'block';
+            
+            // Update entity name and type
+            document.getElementById('entity-name').textContent = entityName;
+            document.getElementById('entity-type').textContent = `Type: ${entityType.charAt(0).toUpperCase() + entityType.slice(1)}`;
+            
+            // Fetch entity details
             fetch(`/api/entity-info?entity_type=${entityType}&entity_name=${entityName}`)
                 .then(response => response.json())
                 .then(data => {
-                    // Show entity details panel
-                    document.getElementById('no-selection-message').style.display = 'none';
-                    document.getElementById('entity-details').style.display = 'block';
-                    
-                    // Update entity info
-                    document.getElementById('entity-name').textContent = data.name;
-                    document.getElementById('entity-type').textContent = 
-                        data.type === 'movement' ? 'Political Movement' : 'Politician';
-                    
                     // Update dimension scores
                     const dimensionScoresContainer = document.getElementById('dimension-scores');
                     dimensionScoresContainer.innerHTML = '';
                     
-                    for (const [dimension, score] of Object.entries(data.dimension_scores)) {
+                    for (const dimension in data.dimension_scores) {
+                        const score = data.dimension_scores[dimension];
+                        
                         const dimensionElement = document.createElement('div');
                         dimensionElement.className = 'dimension-score';
                         
                         const dimensionName = document.createElement('span');
-                        dimensionName.textContent = dimension.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+                        dimensionName.textContent = dimension.replace('_', ' ').replace('axis', '');
                         
                         const dimensionValue = document.createElement('span');
                         dimensionValue.textContent = score.toFixed(2);
@@ -262,6 +345,9 @@
                     
                     // Update word cloud
                     updateWordCloud(data.word_cloud);
+                    
+                    // Load related words for embedding explorer
+                    loadRelatedWords(entityType, entityName);
                 });
         }
         
@@ -297,9 +383,69 @@
                 const fontSize = 12 + (weight / maxWeight) * 16;
                 wordElement.style.fontSize = `${fontSize}px`;
                 
+                // Add click event to explore this word
+                wordElement.addEventListener('click', () => {
+                    showWordDetails(word);
+                });
+                
                 // Add to container
                 wordCloudContainer.appendChild(wordElement);
             });
+        }
+        
+        // --- Load Related Words ---
+        function loadRelatedWords(entityType, entityName) {
+            // Show embedding explorer panel
+            document.getElementById('embedding-explorer-panel').style.display = 'block';
+            
+            // Fetch related words
+            fetch(`/api/word-embeddings/nearest?entity_type=${entityType}&entity_name=${entityName}&top_n=${wordCount}`)
+                .then(response => response.json())
+                .then(data => {
+                    const relatedWordsContainer = document.getElementById('related-words');
+                    relatedWordsContainer.innerHTML = '';
+                    
+                    // Check if we have related words
+                    if (!data.nearest_words || data.nearest_words.length === 0) {
+                        relatedWordsContainer.innerHTML = '<p>No related words found</p>';
+                        return;
+                    }
+                    
+                    // Create related words list
+                    data.nearest_words.forEach(wordData => {
+                        const wordElement = document.createElement('div');
+                        wordElement.className = 'related-word';
+                        
+                        const wordText = document.createElement('span');
+                        wordText.textContent = wordData.word;
+                        
+                        const wordDistance = document.createElement('span');
+                        wordDistance.textContent = wordData.distance.toFixed(3);
+                        
+                        wordElement.appendChild(wordText);
+                        wordElement.appendChild(wordDistance);
+                        
+                        // Add click event to explore this word
+                        wordElement.addEventListener('click', () => {
+                            showWordDetails(wordData.word);
+                        });
+                        
+                        relatedWordsContainer.appendChild(wordElement);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading related words:', error);
+                    document.getElementById('related-words').innerHTML = 
+                        '<p>Error loading related words. Word embeddings may not be available.</p>';
+                });
+        }
+        
+        // --- Show Word Details ---
+        function showWordDetails(word) {
+            // TODO: Implement word details panel
+            console.log(`Showing details for word: ${word}`);
+            // For now, just show an alert
+            alert(`Word: ${word}\n\nThis feature will be expanded in the future to show more details about this word and its position in the embedding space.`);
         }
         
         // --- Initialize Controls ---
@@ -313,6 +459,63 @@
                 document.getElementById('no-selection-message').style.display = 'block';
                 document.getElementById('entity-details').style.display = 'none';
                 document.getElementById('word-cloud-panel').style.display = 'none';
+                document.getElementById('embedding-explorer-panel').style.display = 'none';
+            });
+            
+            // Visualization toggle buttons
+            document.getElementById('standard-view').addEventListener('click', function() {
+                if (currentVisualizationType !== 'standard') {
+                    currentVisualizationType = 'standard';
+                    document.getElementById('standard-view').classList.add('active');
+                    document.getElementById('hybrid-view').classList.remove('active');
+                    
+                    // Reload visualization
+                    if (selectedEntity) {
+                        loadGalaxyVisualization(selectedEntity.type, selectedEntity.name);
+                    } else {
+                        loadGalaxyVisualization();
+                    }
+                }
+            });
+            
+            document.getElementById('hybrid-view').addEventListener('click', function() {
+                if (currentVisualizationType !== 'hybrid') {
+                    currentVisualizationType = 'hybrid';
+                    document.getElementById('hybrid-view').classList.add('active');
+                    document.getElementById('standard-view').classList.remove('active');
+                    
+                    // Reload visualization if entity is selected
+                    if (selectedEntity) {
+                        loadGalaxyVisualization(selectedEntity.type, selectedEntity.name);
+                    } else {
+                        // Show message that hybrid view requires entity selection
+                        alert('Please select an entity first to use the hybrid view.');
+                        currentVisualizationType = 'standard';
+                        document.getElementById('standard-view').classList.add('active');
+                        document.getElementById('hybrid-view').classList.remove('active');
+                    }
+                }
+            });
+            
+            // Word count slider
+            const wordCountSlider = document.getElementById('word-count');
+            const wordCountValue = document.getElementById('word-count-value');
+            
+            wordCountSlider.addEventListener('input', function() {
+                wordCount = parseInt(this.value);
+                wordCountValue.textContent = wordCount;
+            });
+            
+            wordCountSlider.addEventListener('change', function() {
+                // Reload visualization if in hybrid mode with entity selected
+                if (currentVisualizationType === 'hybrid' && selectedEntity) {
+                    loadGalaxyVisualization(selectedEntity.type, selectedEntity.name);
+                }
+                
+                // Reload related words if entity is selected
+                if (selectedEntity) {
+                    loadRelatedWords(selectedEntity.type, selectedEntity.name);
+                }
             });
             
             // TODO: Populate movement and dimension dropdowns
