@@ -14,83 +14,33 @@ app = Flask(__name__)
 
 # --- Data Loading and Pre-computation ---
 print("Loading and processing data...")
-DATA_PATH = 'src/data/processed/political_latent_space.json'
-TEST_EMBEDDING_PATH = 'src/data/embeddings/test_embeddings.h5'
-FULL_EMBEDDING_PATH = 'src/data/embeddings/full_embeddings.h5'
 
-# Initialize the hybrid latent space
-LATENT_SPACE = None
+# Direct path to the multi_level_analysis_results.json file
+ANALYSIS_RESULTS_PATH = 'src/data/processed/multi_level_analysis_results.json'
 
-# Try to load the hybrid latent space with full embeddings
-if os.path.exists(FULL_EMBEDDING_PATH) and os.path.exists(DATA_PATH):
-    try:
-        print(f"Loading hybrid latent space with full embeddings from {FULL_EMBEDDING_PATH}...")
-        LATENT_SPACE = MultiLevelLatentSpace(
-            entity_data_path=DATA_PATH,
-            word_embedding_path=FULL_EMBEDDING_PATH,
-            verbose=True
-        )
-        print("Hybrid latent space loaded successfully with full embeddings.")
-    except Exception as e:
-        print(f"Error loading hybrid latent space with full embeddings: {e}")
-        LATENT_SPACE = None
-
-# Try with test embeddings if full embeddings failed
-if LATENT_SPACE is None and os.path.exists(TEST_EMBEDDING_PATH) and os.path.exists(DATA_PATH):
-    try:
-        print(f"Loading hybrid latent space with test embeddings from {TEST_EMBEDDING_PATH}...")
-        LATENT_SPACE = MultiLevelLatentSpace(
-            entity_data_path=DATA_PATH,
-            word_embedding_path=TEST_EMBEDDING_PATH,
-            verbose=True
-        )
-        print("Hybrid latent space loaded successfully with test embeddings.")
-    except Exception as e:
-        print(f"Error loading hybrid latent space with test embeddings: {e}")
-        print("Word-level embedding features will be disabled.")
-
-# Fall back to entity-only mode if no embeddings are available
-if LATENT_SPACE is None:
-    try:
-        print("WARNING: No embedding files found. Loading in entity-only mode.")
-        LATENT_SPACE = MultiLevelLatentSpace(
-            entity_data_path=DATA_PATH,
-            verbose=True
-        )
-        print("Loaded in entity-only mode. Hybrid visualization will be disabled.")
-    except Exception as e:
-        print(f"Error loading in entity-only mode: {e}")
-        print("Application may not function correctly.")
-
-# Extract entity data for backward compatibility
-if LATENT_SPACE and hasattr(LATENT_SPACE, 'entity_data'):
-    # Make sure the DATA structure matches what create_galaxy_visualization expects
-    DATA = LATENT_SPACE.entity_data if LATENT_SPACE else {}
+# Load the data directly from the JSON file
+DATA = {}
+try:
+    print(f"Loading data directly from {ANALYSIS_RESULTS_PATH}...")
+    with open(ANALYSIS_RESULTS_PATH, 'r', encoding='utf-8') as f:
+        DATA = json.load(f)
+    print(f"Data loaded successfully with keys: {list(DATA.keys())}")
+    if 'movements' in DATA:
+        print(f"Found {len(DATA['movements'])} movements")
+    if 'politicians' in DATA:
+        print(f"Found {len(DATA['politicians'])} politicians")
     
-    # Ensure DATA has the expected structure with both direct access and nested entities format
-    # This makes the data structure compatible with both old and new code
-    if 'movements' not in DATA:
-        if 'entities' in DATA and 'movements' in DATA['entities']:
-            # Extract from nested structure
-            DATA['movements'] = DATA['entities']['movements']
-        else:
-            # Create empty dict if not found
-            DATA['movements'] = {}
-            
-    if 'politicians' not in DATA:
-        if 'entities' in DATA and 'politicians' in DATA['entities']:
-            # Extract from nested structure
-            DATA['politicians'] = DATA['entities']['politicians']
-        else:
-            # Create empty dict if not found
-            DATA['politicians'] = {}
-            
+    # Initialize empty embeddings dictionary if needed
     if 'embeddings' not in DATA:
         DATA['embeddings'] = {}
-else:
+        
+except Exception as e:
+    print(f"Error loading data: {e}")
     DATA = {'movements': {}, 'politicians': {}, 'embeddings': {}}
-    
-EMBEDDING_STORE = LATENT_SPACE.word_embedding_store if LATENT_SPACE else None
+
+# No word embeddings in this simplified version
+EMBEDDING_STORE = None
+LATENT_SPACE = None
 
 print("Data loading complete.")
 
@@ -114,44 +64,9 @@ def get_galaxy_data():
         selected_entity = {'type': entity_type, 'name': entity_name}
     
     try:
-        # Check data structure integrity first
-        if 'movements' not in DATA:
-            print("Warning: 'movements' key not found in DATA. Available keys:", list(DATA.keys()))
-            if 'entities' in DATA and 'movements' in DATA['entities']:
-                print("Found movements in nested 'entities' structure")
-                DATA['movements'] = DATA['entities']['movements']
-            else:
-                print("Creating empty movements dictionary")
-                DATA['movements'] = {}
+        # Simply use the create_galaxy_visualization function with our loaded data
+        galaxy_fig = create_galaxy_visualization(DATA, selected_entity=selected_entity)
         
-        # Check if we have the new hybrid visualization capability
-        if LATENT_SPACE and hasattr(LATENT_SPACE, 'get_hybrid_visualization_data'):
-            try:
-                # Use the hybrid visualization data directly
-                hybrid_data = LATENT_SPACE.get_hybrid_visualization_data(
-                    entity_type=entity_type,
-                    entity_name=entity_name,
-                    num_words=0  # Don't include words in the basic galaxy view
-                )
-                # Convert to Plotly format if needed
-                if isinstance(hybrid_data, dict) and not isinstance(hybrid_data, str):
-                    # If it's already in Plotly format, use it directly
-                    if 'data' in hybrid_data:
-                        galaxy_fig = hybrid_data
-                    else:
-                        # Otherwise, generate the visualization with the selected entity
-                        galaxy_fig = create_galaxy_visualization(DATA, selected_entity=selected_entity)
-                else:
-                    # If it's a string or other format, use it directly
-                    return hybrid_data
-            except Exception as e:
-                print(f"Error in hybrid visualization: {e}")
-                # Fall back to the old visualization
-                galaxy_fig = create_galaxy_visualization(DATA, selected_entity=selected_entity)
-        else:
-            # Fall back to the old visualization
-            galaxy_fig = create_galaxy_visualization(DATA, selected_entity=selected_entity)
-            
         # Use Plotly's JSON encoder to serialize the figure
         return json.dumps(galaxy_fig, cls=plotly.utils.PlotlyJSONEncoder)
         

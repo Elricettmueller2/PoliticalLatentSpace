@@ -64,41 +64,111 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
     random.seed(random_seed)
 
     # --- Data Extraction ---
-    # Handle the case when 'movements' key is missing
-    movements_data = data.get('movements', {})
-    if not movements_data and 'entities' in data and 'movements' in data['entities']:
-        movements_data = data['entities']['movements']
+    # Print the keys in the data structure for debugging
+    print(f"Data keys: {list(data.keys() if isinstance(data, dict) else [])}")
     
-    movement_embeddings = [d['embedding'] for d in movements_data.values() if 'embedding' in d]
-    movement_names = [name for name, d in movements_data.items() if 'embedding' in d]
+    # Create empty lists as defaults
+    movement_embeddings = []
+    movement_names = []
+    politician_embeddings = []
+    politician_names = []
+    politician_movements = []
     
-    # Handle politicians data similarly
-    politicians_data = data.get('politicians', {})
-    if not politicians_data and 'entities' in data and 'politicians' in data['entities']:
-        politicians_data = data['entities']['politicians']
+    # Extract movement data if available
+    if isinstance(data, dict) and 'movements' in data and data['movements']:
+        print(f"Found {len(data['movements'])} movements")
+        for name, d in data['movements'].items():
+            if isinstance(d, dict) and 'embedding' in d and d['embedding']:
+                movement_embeddings.append(d['embedding'])
+                movement_names.append(name)
     
-    politician_embeddings = [d['embedding'] for d in politicians_data.values() if 'embedding' in d]
-    politician_names = [name for name, d in politicians_data.items() if 'embedding' in d]
-    politician_movements = [d.get('movement', 'Unknown') for d in politicians_data.values() if 'embedding' in d]
+    # Extract politician data if available
+    if isinstance(data, dict) and 'politicians' in data and data['politicians']:
+        print(f"Found {len(data['politicians'])} politicians")
+        for name, d in data['politicians'].items():
+            if isinstance(d, dict) and 'embedding' in d and d['embedding']:
+                politician_embeddings.append(d['embedding'])
+                politician_names.append(name)
+                politician_movements.append(d.get('movement', 'Unknown'))
 
     # --- Standardize and Reduce Dimensionality ---
-    # Combine all embeddings for standardization
-    all_embeddings = np.vstack([movement_embeddings, politician_embeddings])
+    # Check if we have any embeddings to work with
+    if len(movement_embeddings) == 0 and len(politician_embeddings) == 0:
+        # No embeddings available, create a simple placeholder visualization
+        print("No embeddings available, creating placeholder visualization")
+        fig = go.Figure()
+        
+        # Add a text annotation explaining the issue
+        fig.update_layout(
+            title="No Embeddings Available",
+            annotations=[{
+                'text': "No embeddings data available. Please check your data source.",
+                'showarrow': False,
+                'font': {'size': 16},
+                'xref': 'paper',
+                'yref': 'paper',
+                'x': 0.5,
+                'y': 0.5
+            }],
+            template='plotly_dark',
+            paper_bgcolor='rgb(10,10,25)',
+            plot_bgcolor='rgb(10,10,25)'
+        )
+        return fig
     
-    # Standardize embeddings
-    scaler = StandardScaler()
-    all_embeddings_standardized = scaler.fit_transform(all_embeddings)
+    # Combine all embeddings for standardization
+    if len(movement_embeddings) > 0 or len(politician_embeddings) > 0:
+        # Check if we have any embeddings with valid dimensions
+        if len(movement_embeddings) > 0:
+            embedding_dim = len(movement_embeddings[0])
+        else:
+            embedding_dim = len(politician_embeddings[0])
+            
+        # Stack the embeddings
+        all_embeddings = np.vstack([movement_embeddings, politician_embeddings])
+        
+        # Standardize embeddings
+        scaler = StandardScaler()
+        all_embeddings_standardized = scaler.fit_transform(all_embeddings)
+    else:
+        # Create placeholder data if no embeddings are available
+        print("No embeddings available, creating placeholder data")
+        embedding_dim = 3  # Default dimension
+        all_embeddings = np.zeros((1, embedding_dim))
+        all_embeddings_standardized = all_embeddings.copy()
     
     # Split back into movements and politicians
     movement_embeddings_standardized = all_embeddings_standardized[:len(movement_embeddings)]
     politician_embeddings_standardized = all_embeddings_standardized[len(movement_embeddings):]
 
     # --- Dimensionality Reduction (UMAP) ---
-    # Project the data into the new space
-    # Use a higher n_neighbors to create more global structure, better preserving the political landscape
-    # Use a lower min_dist to better separate clusters of political entities
-    umap_model = UMAP(n_components=3, random_state=random_seed, n_neighbors=min(30, len(all_embeddings_standardized)-1), min_dist=0.05)
-    all_embeddings_3d = umap_model.fit_transform(all_embeddings_standardized)
+    # Check if we have enough data for UMAP (needs at least 2 samples)
+    if len(all_embeddings_standardized) >= 2:
+        # Project the data into the new space
+        # Use a higher n_neighbors to create more global structure, better preserving the political landscape
+        # Use a lower min_dist to better separate clusters of political entities
+        n_neighbors = min(30, len(all_embeddings_standardized)-1)
+        # UMAP requires at least 2 neighbors
+        n_neighbors = max(2, n_neighbors)
+        
+        try:
+            umap_model = UMAP(n_components=3, random_state=random_seed, n_neighbors=n_neighbors, min_dist=0.05)
+            all_embeddings_3d = umap_model.fit_transform(all_embeddings_standardized)
+        except Exception as e:
+            print(f"UMAP dimensionality reduction failed: {e}")
+            # Fallback to simple projection if UMAP fails
+            if all_embeddings_standardized.shape[1] >= 3:
+                # Use first 3 dimensions
+                all_embeddings_3d = all_embeddings_standardized[:, :3]
+            else:
+                # Pad with zeros to get 3D
+                pad_width = [(0, 0), (0, 3 - all_embeddings_standardized.shape[1])]
+                all_embeddings_3d = np.pad(all_embeddings_standardized, pad_width, mode='constant')
+    else:
+        # Not enough data for UMAP, create simple 3D positions
+        print("Not enough data for UMAP, creating simple 3D positions")
+        all_embeddings_3d = np.array([[0, 0, 0]] * len(all_embeddings_standardized))
+        
     movement_positions = all_embeddings_3d[:len(movement_embeddings)]
     politician_positions = all_embeddings_3d[len(movement_embeddings):]
 
@@ -300,87 +370,9 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
                 hoverinfo='none', showlegend=False
             ))
 
-    # --- 2.5. Add Reference Planes at Origin ---
-    # Create semi-transparent planes at the origin to define octants
-    # Create a grid of points for each plane
-    grid_size = 20
-    grid_range = max_range * 1.0  # Slightly larger than the data range
-    grid_points = np.linspace(-grid_range, grid_range, grid_size)
+    # Reference planes removed as requested
     
-    # Create meshgrid for each plane
-    X, Y = np.meshgrid(grid_points, grid_points)
-    Z = np.zeros((grid_size, grid_size))  # XY plane (Z=0)
-    
-    # Add XY plane (Z=0) - Social-Economic plane
-    fig.add_trace(go.Surface(
-        x=X, y=Y, z=Z,
-        colorscale=[[0, plane_colors['xy']], [1, plane_colors['xy']]],
-        showscale=False,
-        opacity=0.5,
-        hoverinfo='text',
-        hovertext='Social-Economic Plane',
-        showlegend=False,
-        name='Social-Economic Plane'
-    ))
-    
-    # Add XZ plane (Y=0) - Economic-Ecological plane
-    fig.add_trace(go.Surface(
-        x=X, y=Z, z=Y,  # Note the swap to make Y=0
-        colorscale=[[0, plane_colors['xz']], [1, plane_colors['xz']]],
-        showscale=False,
-        opacity=0.5,
-        hoverinfo='text',
-        hovertext='Economic-Ecological Plane',
-        showlegend=False,
-        name='Economic-Ecological Plane'
-    ))
-    
-    # Add YZ plane (X=0) - Social-Ecological plane
-    fig.add_trace(go.Surface(
-        x=Z, y=X, z=Y,  # Note the arrangement to make X=0
-        colorscale=[[0, plane_colors['yz']], [1, plane_colors['yz']]],
-        showscale=False,
-        opacity=0.5,
-        hoverinfo='text',
-        hovertext='Social-Ecological Plane',
-        showlegend=False,
-        name='Social-Ecological Plane'
-    ))
-    
-    # --- 2.6. Add Octant Labels ---
-    # Define political meanings for each octant in German context
-    octant_labels = {
-        # Format: (x_sign, y_sign, z_sign): "Label"
-        # Economic (+/-), Social (+/-), Ecological (+/-)
-        (1, 1, 1): "Grüne/Green-Liberal",  # Green Party, progressive market liberals with ecological focus
-        (1, 1, -1): "FDP/Liberal",  # Free Democratic Party, progressive market liberals
-        (1, -1, 1): "CDU/CSU-Green",  # Conservative with market and green tendencies
-        (1, -1, -1): "CDU/CSU-Business",  # Christian Democrats, conservative market orientation
-        (-1, 1, 1): "Grüne/SPD",  # Social democratic with progressive and green focus
-        (-1, 1, -1): "SPD-Progressive",  # Social Democrats with progressive values
-        (-1, -1, 1): "Die Linke-Green",  # Left party with conservative social values and green focus
-        (-1, -1, -1): "AfD/Traditional Left"  # Mix of traditional values with state economics
-    }
-    
-    # Add octant labels at the center of each octant
-    label_distance = max_range * 0.6  # Position labels at 60% of max range
-    for (x_sign, y_sign, z_sign), label in octant_labels.items():
-        # Calculate position in the center of the octant
-        pos = np.array([x_sign, y_sign, z_sign]) * label_distance
-        
-        # Add text label with German political context
-        fig.add_trace(go.Scatter3d(
-            x=[pos[0]], y=[pos[1]], z=[pos[2]],
-            mode='text',
-            text=[label],
-            textfont=dict(color='white', size=10),
-            hoverinfo='text',
-            hovertext=f"<b>{label}</b><br>" + \
-                     f"Economic: {'Market Liberal' if x_sign > 0 else 'Social Democratic'}<br>" + \
-                     f"Social: {'Progressive' if y_sign > 0 else 'Conservative'}<br>" + \
-                     f"Ecological: {'Green' if z_sign > 0 else 'Industrial'}",
-            showlegend=False
-        ))
+    # Octant labels removed as requested
     
     # --- 3. Add Movements (Planets) ---
     # Create enhanced hover templates with dimension scores
@@ -702,11 +694,7 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
     # Camera distance from center
     camera_distance = 1.8
     
-    # Add a legend explaining the coordinate system in German political context
-    legend_text = "<b>German Political Space Coordinates:</b><br>" + \
-                 "<b>Economic Axis:</b> Market Liberal (+) vs. Social Democratic (-)<br>" + \
-                 "<b>Social Axis:</b> Progressive (+) vs. Conservative (-)<br>" + \
-                 "<b>Ecological Axis:</b> Green (+) vs. Industrial (-)"
+    # Legend text removed as requested
                  
     # Set up the 3D layout with dark theme
     fig.update_layout(
@@ -730,18 +718,7 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
                 eye=dict(x=camera_distance, y=camera_distance, z=camera_distance),
                 center=dict(x=0, y=0, z=0)  # Look at origin where center of mass is now located
             ),
-            annotations=[{
-                'text': legend_text,
-                'x': 0.02, 'y': 0.98, 'z': 0,
-                'showarrow': False,
-                'font': {'color': 'white', 'size': 12},
-                'bgcolor': 'rgba(50, 50, 50, 0.7)',
-                'bordercolor': 'white',
-                'borderwidth': 1,
-                'borderpad': 4,
-                'xanchor': 'left',
-                'yanchor': 'top'
-            }]
+            annotations=[]  # Removed legend annotation
         ),
         paper_bgcolor='rgb(10,10,25)',
         plot_bgcolor='rgb(10,10,25)',
