@@ -776,50 +776,164 @@ function applyFilters() {
     const similarityThreshold = parseFloat(document.getElementById('similarity-threshold').value);
     const relationshipFilter = document.getElementById('relationship-filter').value;
     
-    // Get all node and link elements
-    const nodeElements = document.querySelectorAll('.node');
-    const linkElements = document.querySelectorAll('.link');
+    // Get the focus visualization container
+    const container = document.getElementById('focus-visualization');
     
-    // Filter nodes based on entity type
-    nodeElements.forEach(node => {
-        const nodeData = node.__data__;
-        let visible = true;
+    // Get the current plot data
+    const plotData = Plotly.d3.select('#focus-visualization').data()[0];
+    if (!plotData) return;
+    
+    // Get nodes and links from the global variables
+    const allNodes = window.currentVisualizationNodes || [];
+    const allLinks = window.currentVisualizationLinks || [];
+    
+    if (!allNodes.length) return;
+    
+    // Filter nodes based on criteria
+    const visibleNodes = allNodes.filter(node => {
+        // Always show the focus entity
+        if (node.fixed === true) return true;
         
         // Filter by entity type
-        if (entityTypeFilter !== 'all' && nodeData.type !== entityTypeFilter) {
-            visible = false;
+        if (entityTypeFilter !== 'all' && node.type !== entityTypeFilter) {
+            return false;
         }
         
-        // Apply visibility
-        node.style.display = visible ? 'block' : 'none';
+        // For non-term nodes, filter by similarity threshold
+        if (node.type !== 'term' && node.similarity < similarityThreshold) {
+            return false;
+        }
+        
+        return true;
     });
     
-    // Filter links based on similarity threshold and relationship type
-    linkElements.forEach(link => {
-        const linkData = link.__data__;
-        let visible = true;
-        
-        // Filter by similarity threshold
-        if (linkData.similarity < similarityThreshold) {
-            visible = false;
+    // Get visible node IDs for link filtering
+    const visibleNodeIds = visibleNodes.map(node => node.id);
+    
+    // Filter links based on criteria
+    const visibleLinks = allLinks.filter(link => {
+        // Check if both source and target nodes are visible
+        if (!visibleNodeIds.includes(link.source) || !visibleNodeIds.includes(link.target)) {
+            return false;
         }
         
-        // Filter by relationship type
-        if (relationshipFilter !== 'all' && linkData.relationship !== relationshipFilter) {
-            visible = false;
+        // Filter by relationship type for non-term links
+        if (!link.target.startsWith('term-') && 
+            relationshipFilter !== 'all' && 
+            link.relationshipType !== relationshipFilter) {
+            return false;
         }
         
-        // Check if source and target nodes are visible
-        const sourceNode = document.querySelector(`.node[data-id="${linkData.source}"]`);
-        const targetNode = document.querySelector(`.node[data-id="${linkData.target}"]`);
+        return true;
+    });
+    
+    // Create updated trace for nodes
+    const trace = {
+        x: visibleNodes.map(node => node.x),
+        y: visibleNodes.map(node => node.y),
+        mode: 'markers+text',
+        marker: {
+            size: visibleNodes.map(node => node.size),
+            color: visibleNodes.map(node => node.color),
+            line: { width: 1, color: '#333' }
+        },
+        text: visibleNodes.map(node => node.name),
+        textposition: 'bottom center',
+        textfont: {
+            family: 'Arial',
+            size: visibleNodes.map(node => node.type === 'term' ? 10 : 14),
+            color: visibleNodes.map(node => node.type === 'term' ? '#ddd' : '#fff')
+        },
+        hoverinfo: 'text',
+        hovertext: visibleNodes.map(node => {
+            if (node.type === 'movement') {
+                return `Movement: ${node.name}${formatPositionForHover(node.position)}`;
+            } else if (node.type === 'politician') {
+                return `Politician: ${node.name}<br>Movement: ${node.movement || 'Unknown'}${formatPositionForHover(node.position)}`;
+            } else {
+                return `Term: ${node.name}<br>Weight: ${node.value ? node.value.toFixed(2) : 'N/A'}${node.source ? '<br>Source: ' + node.source : ''}`;
+            }
+        }),
+        ids: visibleNodes.map(node => node.id)
+    };
+    
+    // Create edges as shapes
+    const shapes = visibleLinks.map(link => {
+        const sourceNode = visibleNodes.find(node => node.id === link.source);
+        const targetNode = visibleNodes.find(node => node.id === link.target);
         
-        if ((sourceNode && sourceNode.style.display === 'none') || 
-            (targetNode && targetNode.style.display === 'none')) {
-            visible = false;
+        // Skip if nodes not found
+        if (!sourceNode || !targetNode) return null;
+        
+        // Determine line style based on relationship type
+        const lineStyle = getLineStyle(link.relationshipType);
+        
+        return {
+            type: 'line',
+            x0: sourceNode.x,
+            y0: sourceNode.y,
+            x1: targetNode.x,
+            y1: targetNode.y,
+            line: {
+                color: link.color,
+                width: link.value,
+                dash: lineStyle.dash
+            },
+            opacity: lineStyle.opacity,
+            layer: 'below'
+        };
+    }).filter(shape => shape !== null);
+    
+    // Add political dimension axes
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    
+    shapes.push(
+        // Economic axis (horizontal)
+        {
+            type: 'line',
+            x0: 0,
+            y0: height / 2,
+            x1: width,
+            y1: height / 2,
+            line: {
+                color: 'rgba(200, 200, 200, 0.3)',
+                width: 1,
+                dash: 'dash'
+            },
+            layer: 'below'
+        },
+        // Social axis (vertical)
+        {
+            type: 'line',
+            x0: width / 2,
+            y0: 0,
+            x1: width / 2,
+            y1: height,
+            line: {
+                color: 'rgba(200, 200, 200, 0.3)',
+                width: 1,
+                dash: 'dash'
+            },
+            layer: 'below'
         }
-        
-        // Apply visibility
-        link.style.display = visible ? 'block' : 'none';
+    );
+    
+    // Get the current layout to preserve title and other settings
+    const currentLayout = Plotly.d3.select('#focus-visualization').layout();
+    
+    // Update layout with new shapes
+    const layout = {
+        ...currentLayout,
+        shapes: shapes
+    };
+    
+    // Update the plot
+    Plotly.react('focus-visualization', [trace], layout, {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['select2d', 'lasso2d', 'toggleSpikelines'],
+        displaylogo: false
     });
 }
 
