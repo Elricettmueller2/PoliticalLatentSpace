@@ -1041,4 +1041,7 @@ function backToGalaxy() {
     
     // Hide the entity info panel
     document.getElementById('entity-info-panel').classList.remove('active');
+    
+    // Reload the galaxy visualization
+    loadGalaxyVisualization();
 }
