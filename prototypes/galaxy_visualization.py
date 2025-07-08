@@ -835,14 +835,8 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
     
     # Legend text removed as requested
                  
-    # Set up the 3D layout with dark theme
+    # Set up the 3D layout with dark theme - no title for clean full-screen view
     fig.update_layout(
-        title=dict(
-            text='German Political Space with Word Clouds',
-            font=dict(color='white', size=16),
-            x=0.5,
-            y=0.95
-        ),
         template='plotly_dark',
         scene=dict(
             xaxis_title='Economic Axis', 
@@ -861,7 +855,7 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
         ),
         paper_bgcolor='rgb(10,10,25)',
         plot_bgcolor='rgb(10,10,25)',
-        margin=dict(l=0, r=0, t=50, b=0),
+        margin=dict(l=0, r=0, t=0, b=0),  # Removed top margin (t=0) for full-screen view
         legend=dict(
             font=dict(color='white', size=10),
             bgcolor='rgba(30,30,50,0.8)',
