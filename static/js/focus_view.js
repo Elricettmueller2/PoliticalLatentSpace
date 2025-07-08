@@ -120,6 +120,13 @@ function createFocusVisualization(data, containerId) {
     // Apply force-directed layout
     applyForceLayout(nodes, links, width, height);
     
+    // Store node positions for transitions
+    storeNodePositions(nodes);
+    
+    // Store nodes and links in global variables for filtering
+    window.currentVisualizationNodes = nodes;
+    window.currentVisualizationLinks = links;
+    
     // Create the network visualization using Plotly
     const trace = {
         x: nodes.map(node => node.x),
@@ -738,17 +745,23 @@ function addFilterControls(containerId, nodes, links) {
         </div>
         <div style="margin-bottom: 10px;">
             <label style="color: #ddd; display: block; margin-bottom: 5px;">Relationship type:</label>
-            <select id="relationship-filter" style="width: 100%; padding: 5px; background: #333; color: #fff; border: 1px solid #555;">
+            <select id="relationship-type-filter" style="width: 100%; padding: 5px; background: #333; color: #fff; border: 1px solid #555;">
                 <option value="all">All</option>
                 <option value="alliance">Alliance</option>
                 <option value="opposition">Opposition</option>
                 <option value="neutral">Neutral</option>
             </select>
         </div>
+        <div style="margin-top: 15px;">
+            <button id="apply-filters-btn" style="width: 100%; padding: 8px; background: #4a78a5; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Apply Filters</button>
+        </div>
     `;
     
     // Add to container
     document.getElementById(containerId).parentNode.appendChild(controls);
+    
+    // Initialize filter controls with event listeners
+    initializeFilterControls();
 }
 
 // Add event listeners for filter controls
@@ -756,55 +769,86 @@ function initializeFilterControls() {
     const entityTypeFilter = document.getElementById('entity-type-filter');
     const similarityThreshold = document.getElementById('similarity-threshold');
     const thresholdValue = document.getElementById('threshold-value');
-    const relationshipFilter = document.getElementById('relationship-filter');
+    const relationshipFilter = document.getElementById('relationship-type-filter');
+    const applyFiltersBtn = document.getElementById('apply-filters-btn');
 
     // Update threshold value display
     thresholdValue.textContent = similarityThreshold.value;
     
-    // Add event listeners
-    entityTypeFilter.addEventListener('change', applyFilters);
+    // Only update the threshold value display when slider changes, don't apply filters
     similarityThreshold.addEventListener('input', function() {
         thresholdValue.textContent = this.value;
-        applyFilters();
     });
-    relationshipFilter.addEventListener('change', applyFilters);
+    
+    // Apply filters only when the button is clicked
+    applyFiltersBtn.addEventListener('click', applyFilters);
 }
 
-// Apply filters to the visualization
+// Function to apply filters to the visualization
 function applyFilters() {
-    const entityTypeFilter = document.getElementById('entity-type-filter').value;
-    const similarityThreshold = parseFloat(document.getElementById('similarity-threshold').value);
-    const relationshipFilter = document.getElementById('relationship-filter').value;
+    console.log('applyFilters called');
+    
+    // Get filter elements with error handling
+    const entityTypeFilterEl = document.getElementById('entity-type-filter');
+    const similarityThresholdEl = document.getElementById('similarity-threshold');
+    const relationshipTypeFilterEl = document.getElementById('relationship-type-filter');
+    
+    // Check if all filter elements exist
+    if (!entityTypeFilterEl || !similarityThresholdEl || !relationshipTypeFilterEl) {
+        console.error('Filter elements not found:', { 
+            entityTypeFilter: !!entityTypeFilterEl,
+            similarityThreshold: !!similarityThresholdEl,
+            relationshipTypeFilter: !!relationshipTypeFilterEl
+        });
+        return;
+    }
+    
+    // Get filter values
+    const entityTypeFilter = entityTypeFilterEl.value;
+    const similarityThreshold = parseFloat(similarityThresholdEl.value);
+    const relationshipTypeFilter = relationshipTypeFilterEl.value;
+    
+    console.log('Filter values:', { entityTypeFilter, similarityThreshold, relationshipTypeFilter });
+    
+    // Get all nodes and links
+    const allNodes = window.currentVisualizationNodes;
+    const allLinks = window.currentVisualizationLinks;
+    
+    console.log('Global data available:', { 
+        nodesAvailable: !!allNodes, 
+        linksAvailable: !!allLinks,
+        nodeCount: allNodes ? allNodes.length : 0,
+        linkCount: allLinks ? allLinks.length : 0
+    });
     
     // Get the focus visualization container
     const container = document.getElementById('focus-visualization');
+    if (!container) {
+        console.error('Focus visualization container not found');
+        return;
+    }
     
-    // Get the current plot data
-    const plotData = Plotly.d3.select('#focus-visualization').data()[0];
-    if (!plotData) return;
+    // Check if we have data
+    if (!allNodes || !allNodes.length) {
+        console.error('No nodes data available for filtering');
+        return;
+    }
     
-    // Get nodes and links from the global variables
-    const allNodes = window.currentVisualizationNodes || [];
-    const allLinks = window.currentVisualizationLinks || [];
+    // Find the focus entity (the fixed node)
+    const focusEntity = allNodes.find(node => node.fixed === true) || { type: 'entity', name: 'Focus' };
+    console.log('Focus entity:', focusEntity);
     
-    if (!allNodes.length) return;
-    
-    // Filter nodes based on criteria
+    // Filter nodes based on entity type and similarity threshold
     const visibleNodes = allNodes.filter(node => {
-        // Always show the focus entity
         if (node.fixed === true) return true;
-        
-        // Filter by entity type
-        if (entityTypeFilter !== 'all' && node.type !== entityTypeFilter) {
-            return false;
-        }
-        
-        // For non-term nodes, filter by similarity threshold
-        if (node.type !== 'term' && node.similarity < similarityThreshold) {
-            return false;
-        }
-        
+        if (entityTypeFilter !== 'all' && node.type !== entityTypeFilter) return false;
+        if (node.type !== 'term' && node.similarity < similarityThreshold) return false;
         return true;
+    });
+    
+    console.log('Filtered nodes:', { 
+        visibleNodeCount: visibleNodes.length,
+        nodeTypes: [...new Set(visibleNodes.map(n => n.type))]
     });
     
     // Get visible node IDs for link filtering
@@ -819,8 +863,8 @@ function applyFilters() {
         
         // Filter by relationship type for non-term links
         if (!link.target.startsWith('term-') && 
-            relationshipFilter !== 'all' && 
-            link.relationshipType !== relationshipFilter) {
+            relationshipTypeFilter !== 'all' && 
+            link.relationshipType !== relationshipTypeFilter) {
             return false;
         }
         
@@ -919,22 +963,81 @@ function applyFilters() {
         }
     );
     
-    // Get the current layout to preserve title and other settings
-    const currentLayout = Plotly.d3.select('#focus-visualization').layout();
-    
-    // Update layout with new shapes
+    // Create a new layout with all necessary settings
     const layout = {
-        ...currentLayout,
-        shapes: shapes
+        title: {
+            text: `${focusEntity.type}: ${focusEntity.name}`,
+            font: {
+                color: '#ffffff',
+                size: 18
+            }
+        },
+        showlegend: false,
+        hovermode: 'closest',
+        shapes: shapes,
+        // Explicitly set background colors
+        paper_bgcolor: '#1a1a1a',
+        plot_bgcolor: '#1a1a1a',
     };
     
     // Update the plot
-    Plotly.react('focus-visualization', [trace], layout, {
-        responsive: true,
-        displayModeBar: true,
-        modeBarButtonsToRemove: ['select2d', 'lasso2d', 'toggleSpikelines'],
-        displaylogo: false
+    console.log('Updating plot with:', { 
+        tracePointCount: trace.x.length,
+        layoutShapesCount: layout.shapes.length,
+        containerId: 'focus-visualization'
     });
+    
+    // Debug trace data
+    console.log('First 3 nodes in trace:', trace.x.slice(0, 3).map((x, i) => ({
+        x: x,
+        y: trace.y[i],
+        name: trace.text[i],
+        color: trace.marker.color[i]
+    })));
+    
+    try {
+        // First, clear the container completely
+        container.innerHTML = '';
+        
+        console.log('Container cleared, creating new plot');
+        
+        // Create a completely new plot
+        Plotly.newPlot('focus-visualization', [trace], layout, {
+            responsive: true,
+            displayModeBar: true,
+            modeBarButtonsToRemove: ['select2d', 'lasso2d', 'toggleSpikelines'],
+            displaylogo: false
+        });
+        
+        console.log('New plot created successfully');
+        
+        // Re-add click event handler using Plotly's on method
+        const myPlot = document.getElementById('focus-visualization');
+        myPlot.on('plotly_click', function(data) {
+            if (!data || !data.points || !data.points[0]) return;
+            
+            const pointIndex = data.points[0].pointIndex;
+            if (pointIndex >= visibleNodes.length) {
+                console.error('Point index out of bounds:', pointIndex, 'visibleNodes length:', visibleNodes.length);
+                return;
+            }
+            
+            const clickedNode = visibleNodes[pointIndex];
+            console.log('Clicked node:', clickedNode);
+            
+            // Skip if clicked on the focus entity or a term
+            if (clickedNode.fixed === true || clickedNode.type === 'term') {
+                return;
+            }
+            
+            // Navigate to the clicked entity
+            loadEntityFocusView(clickedNode.type, clickedNode.name);
+        });
+    } catch (error) {
+        console.error('Error creating plot:', error);
+        // Show error in container
+        container.innerHTML = `<div class="error">Error applying filters: ${error.message}</div>`;
+    }
 }
 
 // Function to load entity focus view
