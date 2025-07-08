@@ -6,6 +6,8 @@
     <title>Political Latent Space</title>
     <!-- Plotly.js -->
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <!-- D3.js for force layout calculations -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -21,504 +23,243 @@
         }
         .container {
             display: flex;
-            flex-direction: row;
+            flex-direction: column;
             width: 100%;
-            height: 100vh;
+            height: calc(100vh - 60px); /* Account for the header */
         }
-        .chart-container {
-            width: 75%;
+        .visualization-container {
+            width: 100%;
             height: 100%;
-            padding: 10px;
-            box-sizing: border-box;
+            position: relative;
         }
-        .sidebar {
-            width: 25%;
+        #galaxy-container {
+            width: 100%;
             height: 100%;
-            padding: 20px;
-            box-sizing: border-box;
-            background-color: #222;
-            overflow-y: auto;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        #focus-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            display: none;
+            background-color: #1a1a1a;
+        }
+        .focus-header {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .focus-header h3 {
+            margin: 0;
+            color: #fff;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+        }
+        #back-to-galaxy {
+            background-color: rgba(40, 40, 40, 0.7);
+            color: #fff;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: background-color 0.2s;
+        }
+        #back-to-galaxy:hover {
+            background-color: rgba(60, 60, 60, 0.9);
+        }
+        #entity-info-panel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: rgba(34, 34, 34, 0.95);
+            border-top: 1px solid #444;
+            transform: translateY(100%);
+            transition: transform 0.3s ease-out;
+            z-index: 1000;
+            max-height: 40vh;
             display: flex;
             flex-direction: column;
         }
-        .info-panel {
-            background-color: #333;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
+        #entity-info-panel.active {
+            transform: translateY(calc(100% - 40px));
         }
-        .info-panel h3 {
-            margin-top: 0;
-            border-bottom: 1px solid #555;
-            padding-bottom: 10px;
+        #entity-info-panel.expanded {
+            transform: translateY(0);
+        }
+        .info-panel-handle {
+            height: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #333;
+            cursor: pointer;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+        .info-panel-content {
+            padding: 20px;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+        .dimension-scores {
+            margin-top: 15px;
         }
         .dimension-score {
             display: flex;
+            flex-direction: column;
+            margin-bottom: 15px;
+        }
+        .dimension-header {
+            display: flex;
             justify-content: space-between;
-            margin-bottom: 8px;
+            margin-bottom: 5px;
         }
         .dimension-score-bar {
             height: 8px;
             background-color: #444;
             border-radius: 4px;
-            margin-top: 5px;
             position: relative;
         }
         .dimension-score-fill {
             height: 100%;
             border-radius: 4px;
-            position: absolute;
-            left: 0;
         }
-        .word-cloud {
+        .loading {
             display: flex;
-            flex-wrap: wrap;
             justify-content: center;
-            gap: 8px;
+            align-items: center;
+            height: 100%;
+            font-size: 18px;
+            color: #aaa;
         }
-        .word-cloud-word {
-            padding: 5px 10px;
-            border-radius: 15px;
-            background-color: #444;
-            display: inline-block;
-            margin: 3px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        .word-cloud-word:hover {
-            background-color: #555;
-        }
-        .embedding-explorer {
-            margin-top: 15px;
-        }
-        .embedding-explorer h4 {
-            margin-bottom: 10px;
-        }
-        .related-words {
-            max-height: 200px;
-            overflow-y: auto;
-            background-color: #2a2a2a;
-            border-radius: 4px;
-            padding: 10px;
-        }
-        .related-word {
+        .error {
             display: flex;
-            justify-content: space-between;
-            padding: 4px 8px;
-            border-radius: 4px;
-            margin-bottom: 4px;
-            cursor: pointer;
-        }
-        .related-word:hover {
-            background-color: #3a3a3a;
-        }
-        .visualization-toggle {
-            display: flex;
-            margin-bottom: 15px;
-        }
-        .visualization-toggle button {
-            flex: 1;
-            margin: 0 5px;
-        }
-        .visualization-toggle button.active {
-            background-color: #3a6fa5;
-        }
-        .loading-indicator {
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            font-size: 18px;
+            color: #e63946;
             text-align: center;
             padding: 20px;
-            display: none;
-        }
-        .loading-indicator::after {
-            content: "Loading...";
-            animation: ellipsis 1.5s infinite;
-        }
-        @keyframes ellipsis {
-            0% { content: "Loading."; }
-            33% { content: "Loading.."; }
-            66% { content: "Loading..."; }
-        }
-        select, button {
-            width: 100%;
-            padding: 8px;
-            background-color: #333;
-            color: #e0e0e0;
-            border: 1px solid #555;
-            border-radius: 4px;
-        }
-        button {
-            cursor: pointer;
-            margin-top: 10px;
-            background-color: #2a5885;
-        }
-        button:hover {
-            background-color: #3a6fa5;
         }
     </style>
 </head>
 <body>
+    <h1>Political Latent Space</h1>
+    
     <div class="container">
-        <div class="chart-container">
-            <div id="galaxy-chart" style="width: 100%; height: 100%;"></div>
-            <div id="loading-visualization" class="loading-indicator"></div>
-        </div>
-        <div class="sidebar">
-            <div class="info-panel" id="entity-info">
-                <h3>Entity Information</h3>
-                <p id="no-selection-message">Select an entity in the visualization to see details.</p>
-                <div id="entity-details" style="display: none;">
-                    <h4 id="entity-name"></h4>
-                    <p id="entity-type"></p>
-                    <h4>Dimension Scores</h4>
+        <div class="visualization-container">
+            <!-- 3D Galaxy View (default) -->
+            <div id="galaxy-container"></div>
+            
+            <!-- 2D Focus View (hidden by default) -->
+            <div id="focus-container">
+                <div class="focus-header">
+                    <button id="back-to-galaxy">
+                        <span>←</span> Back to Galaxy
+                    </button>
+                    <h3 id="focus-entity-title">Entity Focus View</h3>
                 </div>
+                <div id="focus-visualization" style="height: 100%;"></div>
             </div>
-        </div>
-        
-        <!-- Entity info panel (will slide in from bottom when in focus view) -->
-        <div id="entity-info-panel" class="info-panel">
-            <div class="info-panel-content">
-                <div id="entity-info">
-                    <h3>Political Galaxy</h3>
-                    <p>Click on a movement or politician to see details.</p>
-                </div>
-            </div>
-            <div class="info-panel-handle">▲</div>
         </div>
     </div>
     
-    <!-- Add Bootstrap Icons -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css">
+    <!-- Entity info panel (slides in from bottom when in focus view) -->
+    <div id="entity-info-panel">
+        <div class="info-panel-handle">▲</div>
+        <div class="info-panel-content">
+            <div id="entity-info">
+                <h3>Political Galaxy</h3>
+                <p>Click on a movement or politician to see details.</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Load focus view script -->
+    <script src="/static/js/focus_view.js"></script>
     
     <script>
         // Global variables
         let selectedEntity = null;
-        let movementsList = [];
-        let dimensionsList = [];
-        let currentVisualizationType = 'standard'; // 'standard' or 'hybrid'
-        let wordCount = 50;
         
-        // --- Initialize Galaxy Visualization ---
-        function loadGalaxyVisualization(entityType = null, entityName = null) {
-            // Show loading indicator
-            document.getElementById('loading-visualization').style.display = 'block';
-            
-            // Build URL with parameters
-            let url = '/api/galaxy-data';
-            const params = new URLSearchParams();
-            
-            if (entityType && entityName) {
-                params.append('entity_type', entityType);
-                params.append('entity_name', entityName);
-                selectedEntity = { type: entityType, name: entityName };
-            } else {
-                selectedEntity = null;
-            }
-            
-            if (params.toString()) {
-                url += '?' + params.toString();
-            }
-            
-            // Use the appropriate endpoint based on visualization type
-            if (currentVisualizationType === 'hybrid' && selectedEntity) {
-                url = `/api/hybrid-visualization?entity_type=${entityType}&entity_name=${entityName}&num_words=${wordCount}`;
-            }
-            
-            // Fetch data and create visualization
-            fetch(url)
-                .then(response => response.json())
-                .then(figure => {
-                    Plotly.newPlot('galaxy-chart', figure.data, figure.layout, {responsive: true});
-                    
-                    // Hide loading indicator
-                    document.getElementById('loading-visualization').style.display = 'none';
-                    
-                    // Set up click event for the plot
-                    document.getElementById('galaxy-chart').on('plotly_click', function(data) {
-                        const point = data.points[0];
-                        const pointData = point.data;
-                        
-                        // Check if this is an entity point (not a word or axis)
-                        if (pointData.name === 'Movements') {
-                            const entityType = 'movement';
-                            const entityName = point.text;
-                            
-                            // Update selected entity
-                            selectedEntity = { type: entityType, name: entityName };
-                            
-                            // Load entity details
-                            loadEntityDetails(entityType, entityName);
-                            
-                            // Reload visualization with selected entity
-                            loadGalaxyVisualization(entityType, entityName);
-                            
-                            console.log(`Selected movement: ${entityName}`);
-                        } 
-                        else if (pointData.name === 'Politicians') {
-                            const entityType = 'politician';
-                            const entityName = point.text;
-                            
-                            // Update selected entity
-                            selectedEntity = { type: entityType, name: entityName };
-                            
-                            // Load entity details
-                            loadEntityDetails(entityType, entityName);
-                            
-                            // Reload visualization with selected entity
-                            loadGalaxyVisualization(entityType, entityName);
-                            
-                            console.log(`Selected politician: ${entityName}`);
-                        }
-                        // Check if this is a word point
-                        else if (pointData.name === 'Related Words') {
-                            const word = point.text;
-                            // Show word details
-                            showWordDetails(word);
-                        }
-                    });
-                })
-                .catch(error => {
-                    console.error('Error loading visualization:', error);
-                    document.getElementById('loading-visualization').style.display = 'none';
-                });
-        }
-        
-        // --- Load Entity Details ---
-        function loadEntityDetails(entityType, entityName) {
-            // Show entity details and hide no selection message
-            document.getElementById('no-selection-message').style.display = 'none';
-            document.getElementById('entity-details').style.display = 'block';
-            
-            // Update entity name and type
-            document.getElementById('entity-name').textContent = entityName;
-            document.getElementById('entity-type').textContent = `Type: ${entityType.charAt(0).toUpperCase() + entityType.slice(1)}`;
-            
-            // Fetch entity details
-            fetch(`/api/entity-info?entity_type=${entityType}&entity_name=${entityName}`)
-                .then(response => response.json())
-                .then(data => {
-                    // Update dimension scores
-                    const dimensionScoresContainer = document.getElementById('dimension-scores');
-                    dimensionScoresContainer.innerHTML = '';
-                    
-                    for (const dimension in data.dimension_scores) {
-                        const score = data.dimension_scores[dimension];
-                        
-                        const dimensionElement = document.createElement('div');
-                        dimensionElement.className = 'dimension-score';
-                        
-                        const dimensionName = document.createElement('span');
-                        dimensionName.textContent = dimension.replace('_', ' ').replace('axis', '');
-                        
-                        const dimensionValue = document.createElement('span');
-                        dimensionValue.textContent = score.toFixed(2);
-                        
-                        dimensionElement.appendChild(dimensionName);
-                        dimensionElement.appendChild(dimensionValue);
-                        
-                        const barContainer = document.createElement('div');
-                        barContainer.className = 'dimension-score-bar';
-                        barContainer.style.width = '100%';
-                        
-                        const barFill = document.createElement('div');
-                        barFill.className = 'dimension-score-fill';
-                        barFill.style.width = `${score * 100}%`;
-                        
-                        // Color based on dimension
-                        let color = '#888';
-                        if (dimension === 'economic_axis') color = 'rgba(255, 165, 0, 0.8)';
-                        if (dimension === 'social_axis') color = 'rgba(65, 105, 225, 0.8)';
-                        if (dimension === 'ecological_axis') color = 'rgba(50, 205, 50, 0.8)';
-                        barFill.style.backgroundColor = color;
-                        
-                        barContainer.appendChild(barFill);
-                        dimensionElement.appendChild(barContainer);
-                        
-                        dimensionScoresContainer.appendChild(dimensionElement);
-                    }
-                    
-                    // Update word cloud
-                    updateWordCloud(data.word_cloud);
-                    
-                    // Load related words for embedding explorer
-                    loadRelatedWords(entityType, entityName);
-                });
-        }
-        
-        // --- Update Word Cloud ---
-        function updateWordCloud(wordCloudData) {
-            const wordCloudContainer = document.getElementById('word-cloud');
-            wordCloudContainer.innerHTML = '';
-            
-            // Show word cloud panel
-            document.getElementById('word-cloud-panel').style.display = 'block';
-            
-            // Check if we have word cloud data
-            if (!wordCloudData || Object.keys(wordCloudData).length === 0) {
-                wordCloudContainer.innerHTML = '<p>No word cloud data available</p>';
-                return;
-            }
-            
-            // Sort words by weight
-            const words = Object.entries(wordCloudData)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 20); // Show top 20 words
-            
-            // Find max weight for scaling
-            const maxWeight = Math.max(...words.map(w => w[1]));
-            
-            // Create word cloud
-            words.forEach(([word, weight]) => {
-                const wordElement = document.createElement('span');
-                wordElement.className = 'word-cloud-word';
-                wordElement.textContent = word;
-                
-                // Scale font size based on weight
-                const fontSize = 12 + (weight / maxWeight) * 16;
-                wordElement.style.fontSize = `${fontSize}px`;
-                
-                // Add click event to explore this word
-                wordElement.addEventListener('click', () => {
-                    showWordDetails(word);
-                });
-                
-                // Add to container
-                wordCloudContainer.appendChild(wordElement);
-            });
-        }
-        
-        // --- Load Related Words ---
-        function loadRelatedWords(entityType, entityName) {
-            // Show embedding explorer panel
-            document.getElementById('embedding-explorer-panel').style.display = 'block';
-            
-            // Fetch related words
-            fetch(`/api/word-embeddings/nearest?entity_type=${entityType}&entity_name=${entityName}&top_n=${wordCount}`)
-                .then(response => response.json())
-                .then(data => {
-                    const relatedWordsContainer = document.getElementById('related-words');
-                    relatedWordsContainer.innerHTML = '';
-                    
-                    // Check if we have related words
-                    if (!data.nearest_words || data.nearest_words.length === 0) {
-                        relatedWordsContainer.innerHTML = '<p>No related words found</p>';
-                        return;
-                    }
-                    
-                    // Create related words list
-                    data.nearest_words.forEach(wordData => {
-                        const wordElement = document.createElement('div');
-                        wordElement.className = 'related-word';
-                        
-                        const wordText = document.createElement('span');
-                        wordText.textContent = wordData.word;
-                        
-                        const wordDistance = document.createElement('span');
-                        wordDistance.textContent = wordData.distance.toFixed(3);
-                        
-                        wordElement.appendChild(wordText);
-                        wordElement.appendChild(wordDistance);
-                        
-                        // Add click event to explore this word
-                        wordElement.addEventListener('click', () => {
-                            showWordDetails(wordData.word);
-                        });
-                        
-                        relatedWordsContainer.appendChild(wordElement);
-                    });
-                })
-                .catch(error => {
-                    console.error('Error loading related words:', error);
-                    document.getElementById('related-words').innerHTML = 
-                        '<p>Error loading related words. Word embeddings may not be available.</p>';
-                });
-        }
-        
-        // --- Show Word Details ---
-        function showWordDetails(word) {
-            // TODO: Implement word details panel
-            console.log(`Showing details for word: ${word}`);
-            // For now, just show an alert
-            alert(`Word: ${word}\n\nThis feature will be expanded in the future to show more details about this word and its position in the embedding space.`);
-        }
-        
-        // --- Initialize Controls ---
-        function initializeControls() {
-            // Reset view button
-            document.getElementById('reset-view').addEventListener('click', function() {
-                selectedEntity = null;
-                loadGalaxyVisualization();
-                
-                // Reset entity info panel
-                document.getElementById('no-selection-message').style.display = 'block';
-                document.getElementById('entity-details').style.display = 'none';
-                document.getElementById('word-cloud-panel').style.display = 'none';
-                document.getElementById('embedding-explorer-panel').style.display = 'none';
-            });
-            
-            // Visualization toggle buttons
-            document.getElementById('standard-view').addEventListener('click', function() {
-                if (currentVisualizationType !== 'standard') {
-                    currentVisualizationType = 'standard';
-                    document.getElementById('standard-view').classList.add('active');
-                    document.getElementById('hybrid-view').classList.remove('active');
-                    
-                    // Reload visualization
-                    if (selectedEntity) {
-                        loadGalaxyVisualization(selectedEntity.type, selectedEntity.name);
-                    } else {
-                        loadGalaxyVisualization();
-                    }
-                }
-            });
-            
-            document.getElementById('hybrid-view').addEventListener('click', function() {
-                if (currentVisualizationType !== 'hybrid') {
-                    currentVisualizationType = 'hybrid';
-                    document.getElementById('hybrid-view').classList.add('active');
-                    document.getElementById('standard-view').classList.remove('active');
-                    
-                    // Reload visualization if entity is selected
-                    if (selectedEntity) {
-                        loadGalaxyVisualization(selectedEntity.type, selectedEntity.name);
-                    } else {
-                        // Show message that hybrid view requires entity selection
-                        alert('Please select an entity first to use the hybrid view.');
-                        currentVisualizationType = 'standard';
-                        document.getElementById('standard-view').classList.add('active');
-                        document.getElementById('hybrid-view').classList.remove('active');
-                    }
-                }
-            });
-            
-            // Word count slider
-            const wordCountSlider = document.getElementById('word-count');
-            const wordCountValue = document.getElementById('word-count-value');
-            
-            wordCountSlider.addEventListener('input', function() {
-                wordCount = parseInt(this.value);
-                wordCountValue.textContent = wordCount;
-            });
-            
-            wordCountSlider.addEventListener('change', function() {
-                // Reload visualization if in hybrid mode with entity selected
-                if (currentVisualizationType === 'hybrid' && selectedEntity) {
-                    loadGalaxyVisualization(selectedEntity.type, selectedEntity.name);
-                }
-                
-                // Reload related words if entity is selected
-                if (selectedEntity) {
-                    loadRelatedWords(selectedEntity.type, selectedEntity.name);
-                }
-            });
-            
-            // TODO: Populate movement and dimension dropdowns
-            // This will be implemented in the next phase
-        }
-        
-        // --- Initialize Application ---
+        // Load the galaxy visualization when the page loads
         document.addEventListener('DOMContentLoaded', function() {
             loadGalaxyVisualization();
-            initializeControls();
+            
+            // Set up event listeners
+            document.getElementById('back-to-galaxy').addEventListener('click', backToGalaxy);
+            document.querySelector('.info-panel-handle').addEventListener('click', toggleInfoPanel);
         });
+        
+        // Function to load the 3D galaxy visualization
+        function loadGalaxyVisualization() {
+            // Show loading indicator
+            document.getElementById('galaxy-container').innerHTML = '<div class="loading">Loading galaxy visualization...</div>';
+            
+            // Fetch the galaxy data
+            fetch('/api/galaxy-data')
+                .then(response => response.json())
+                .then(data => {
+                    // Parse the JSON if needed
+                    const figure = typeof data === 'string' ? JSON.parse(data) : data;
+                    
+                    // Create the plot
+                    Plotly.newPlot('galaxy-container', figure.data, figure.layout, {
+                        responsive: true,
+                        displayModeBar: true,
+                        modeBarButtonsToRemove: ['select2d', 'lasso2d'],
+                        displaylogo: false
+                    });
+                    
+                    // Add click event handler
+                    document.getElementById('galaxy-container').on('plotly_click', function(data) {
+                        const point = data.points[0];
+                        const traceName = point.data.name;
+                        
+                        // Check if we clicked on a movement or politician
+                        if (traceName === 'Movements' || traceName === 'Politicians') {
+                            const entityName = point.text;
+                            const entityType = traceName === 'Movements' ? 'movement' : 'politician';
+                            
+                            // Store the selected entity
+                            selectedEntity = {
+                                name: entityName,
+                                type: entityType
+                            };
+                            
+                            // Directly transition to focus view
+                            loadEntityFocusView(entityType, entityName);
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading galaxy data:', error);
+                    document.getElementById('galaxy-container').innerHTML = 
+                        '<div class="error">Error loading visualization: ' + error.message + '</div>';
+                });
+        }
+        
+        // Function to toggle the info panel expansion
+        function toggleInfoPanel() {
+            const panel = document.getElementById('entity-info-panel');
+            if (panel.classList.contains('expanded')) {
+                panel.classList.remove('expanded');
+            } else {
+                panel.classList.add('expanded');
+            }
+        }
     </script>
 </body>
 </html>
