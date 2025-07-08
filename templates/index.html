@@ -169,50 +169,25 @@
                     <h4 id="entity-name"></h4>
                     <p id="entity-type"></p>
                     <h4>Dimension Scores</h4>
-                    <div id="dimension-scores"></div>
-                </div>
-            </div>
-            
-            <div class="info-panel" id="word-cloud-panel" style="display: none;">
-                <h3>Word Cloud</h3>
-                <div id="word-cloud" class="word-cloud"></div>
-            </div>
-            
-            <div class="info-panel" id="embedding-explorer-panel" style="display: none;">
-                <h3>Embedding Explorer</h3>
-                <div class="embedding-explorer">
-                    <h4>Related Words</h4>
-                    <div id="related-words" class="related-words"></div>
-                </div>
-            </div>
-            
-            <div class="controls">
-                <div class="visualization-toggle">
-                    <button id="standard-view" class="active">Standard View</button>
-                    <button id="hybrid-view">Hybrid View</button>
-                </div>
-                
-                <div class="control-group">
-                    <label for="movement-filter">Filter by Movement:</label>
-                    <select id="movement-filter">
-                        <option value="">All Movements</option>
-                        <!-- Will be populated dynamically -->
-                    </select>
-                </div>
-                
-                <div class="control-group">
-                    <label for="word-count">Word Count:</label>
-                    <input type="range" id="word-count" min="10" max="200" value="50" step="10">
-                    <span id="word-count-value">50</span>
-                </div>
-                
-                <div class="control-group">
-                    <button id="reset-view">Reset View</button>
                 </div>
             </div>
         </div>
+        
+        <!-- Entity info panel (will slide in from bottom when in focus view) -->
+        <div id="entity-info-panel" class="info-panel">
+            <div class="info-panel-content">
+                <div id="entity-info">
+                    <h3>Political Galaxy</h3>
+                    <p>Click on a movement or politician to see details.</p>
+                </div>
+            </div>
+            <div class="info-panel-handle">▲</div>
+        </div>
     </div>
-
+    
+    <!-- Add Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css">
+    
     <script>
         // Global variables
         let selectedEntity = null;
@@ -261,9 +236,9 @@
                         const point = data.points[0];
                         const pointData = point.data;
                         
-                        // Check if this is an entity point (not a word)
-                        if (pointData.name && (pointData.name.includes('Parties') || pointData.name.includes('Politicians'))) {
-                            const entityType = pointData.name.includes('Parties') ? 'party' : 'politician';
+                        // Check if this is an entity point (not a word or axis)
+                        if (pointData.name === 'Movements') {
+                            const entityType = 'movement';
                             const entityName = point.text;
                             
                             // Update selected entity
@@ -274,7 +249,24 @@
                             
                             // Reload visualization with selected entity
                             loadGalaxyVisualization(entityType, entityName);
+                            
+                            console.log(`Selected movement: ${entityName}`);
                         } 
+                        else if (pointData.name === 'Politicians') {
+                            const entityType = 'politician';
+                            const entityName = point.text;
+                            
+                            // Update selected entity
+                            selectedEntity = { type: entityType, name: entityName };
+                            
+                            // Load entity details
+                            loadEntityDetails(entityType, entityName);
+                            
+                            // Reload visualization with selected entity
+                            loadGalaxyVisualization(entityType, entityName);
+                            
+                            console.log(`Selected politician: ${entityName}`);
+                        }
                         // Check if this is a word point
                         else if (pointData.name === 'Related Words') {
                             const word = point.text;

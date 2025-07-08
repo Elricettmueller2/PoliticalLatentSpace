@@ -95,6 +95,195 @@ def get_galaxy_data():
         }
         return jsonify(error_response)
 
+@app.route('/api/entity-focus')
+def get_entity_focus():
+    """Provide data for the 2D drill-down visualization that focuses on a selected entity and its relationships."""
+    # Get parameters
+    entity_type = request.args.get('entity_type')
+    entity_name = request.args.get('entity_name')
+    num_words = int(request.args.get('num_words', 50))
+    
+    if not entity_type or not entity_name:
+        return jsonify({
+            'error': True,
+            'message': 'Entity type and name are required for entity focus view'
+        })
+    
+    try:
+        # Get entity data
+        entity_data = None
+        if entity_type == 'movement' and entity_name in DATA.get('movements', {}):
+            entity_data = DATA['movements'][entity_name]
+        elif entity_type == 'politician' and entity_name in DATA.get('politicians', {}):
+            entity_data = DATA['politicians'][entity_name]
+        
+        if not entity_data:
+            return jsonify({
+                'error': True,
+                'message': f'Entity not found: {entity_type} {entity_name}'
+            })
+        
+        # Get related entities
+        related_entities = []
+        
+        # For movements, get related politicians
+        if entity_type == 'movement':
+            for politician_name, politician_data in DATA['politicians'].items():
+                if politician_data.get('movement') == entity_name:
+                    # Calculate similarity or use position data
+                    position = politician_data.get('position', {}).get('expert_dimensions', {}).get('axes', {})
+                    related_entities.append({
+                        'name': politician_name,
+                        'type': 'politician',
+                        'movement': entity_name,
+                        'position': position,
+                        'similarity': 0.8  # Placeholder, will calculate actual similarity
+                    })
+            
+            # Add other movements based on similarity
+            for other_movement, movement_data in DATA['movements'].items():
+                if other_movement != entity_name:
+                    # Calculate similarity between movements
+                    position = movement_data.get('position', {}).get('expert_dimensions', {}).get('axes', {})
+                    # Simple similarity based on position differences
+                    similarity = 0.5  # Placeholder
+                    related_entities.append({
+                        'name': other_movement,
+                        'type': 'movement',
+                        'position': position,
+                        'similarity': similarity
+                    })
+        
+        # For politicians, get their movement and colleagues
+        elif entity_type == 'politician':
+            # Get politician's movement
+            politician_movement = entity_data.get('movement')
+            if politician_movement and politician_movement in DATA['movements']:
+                movement_data = DATA['movements'][politician_movement]
+                position = movement_data.get('position', {}).get('expert_dimensions', {}).get('axes', {})
+                related_entities.append({
+                    'name': politician_movement,
+                    'type': 'movement',
+                    'position': position,
+                    'similarity': 0.9  # High similarity to own movement
+                })
+                
+                # Get colleagues from same movement
+                for politician_name, politician_data in DATA['politicians'].items():
+                    if politician_data.get('movement') == politician_movement and politician_name != entity_name:
+                        position = politician_data.get('position', {}).get('expert_dimensions', {}).get('axes', {})
+                        related_entities.append({
+                            'name': politician_name,
+                            'type': 'politician',
+                            'movement': politician_movement,
+                            'position': position,
+                            'similarity': 0.7  # Placeholder for colleague similarity
+                        })
+        
+        # Get word cloud data
+        word_cloud = entity_data.get('word_cloud', {})
+        if not word_cloud:  # If word cloud is empty, generate sample data
+            word_cloud = generate_word_cloud(entity_type, entity_name)
+        
+        # Format word cloud for visualization
+        word_cloud_viz = []
+        for term, weight in word_cloud.items():
+            # Get position for the term if available in WORD_DIMENSION_SCORES
+            position = WORD_DIMENSION_SCORES.get(term.lower(), [0, 0, 0])
+            word_cloud_viz.append({
+                'text': term,
+                'value': weight,
+                'position': position
+            })
+        
+        # Sort by value for importance
+        word_cloud_viz.sort(key=lambda x: x['value'], reverse=True)
+        
+        # Limit to top words
+        word_cloud_viz = word_cloud_viz[:num_words]
+        
+        # Create 2D visualization data
+        focus_data = {
+            'entity': {
+                'name': entity_name,
+                'type': entity_type,
+                'position': entity_data.get('position', {}).get('expert_dimensions', {}).get('axes', {})
+            },
+            'related_entities': related_entities,
+            'word_cloud': word_cloud_viz
+        }
+        
+        return jsonify(focus_data)
+        
+    except Exception as e:
+        print(f"Error generating entity focus view: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Return a valid JSON error response
+        return jsonify({
+            'error': True,
+            'message': f"Failed to generate entity focus view: {str(e)}"
+        })
+
+
+@app.route('/api/hybrid-visualization')
+def get_hybrid_visualization():
+    """Provide data for the hybrid visualization that focuses on a selected entity and its relationships."""
+    # Get parameters
+    entity_type = request.args.get('entity_type')
+    entity_name = request.args.get('entity_name')
+    num_words = int(request.args.get('num_words', 50))
+    
+    if not entity_type or not entity_name:
+        return jsonify({
+            'error': True,
+            'message': 'Entity type and name are required for hybrid visualization'
+        })
+    
+    try:
+        # Create a selected entity object
+        selected_entity = {'type': entity_type, 'name': entity_name}
+        
+        # Use the same visualization function but with a flag to indicate hybrid mode
+        # This could be extended in the future to use a specialized function
+        galaxy_fig = create_galaxy_visualization(
+            DATA, 
+            selected_entity=selected_entity,
+            hybrid_mode=True,  # Flag to indicate hybrid visualization mode
+            num_words=num_words
+        )
+        
+        # Use Plotly's JSON encoder to serialize the figure
+        return json.dumps(galaxy_fig, cls=plotly.utils.PlotlyJSONEncoder)
+        
+    except Exception as e:
+        print(f"Error generating hybrid visualization: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Return a valid JSON error response
+        error_response = {
+            'error': True,
+            'message': f"Failed to generate hybrid visualization: {str(e)}",
+            'data': [],
+            'layout': {
+                'title': 'Error: Could not load hybrid visualization',
+                'annotations': [{
+                    'text': f"Error: {str(e)}",
+                    'showarrow': False,
+                    'font': {'size': 16, 'color': 'red'},
+                    'xref': 'paper',
+                    'yref': 'paper',
+                    'x': 0.5,
+                    'y': 0.5
+                }]
+            }
+        }
+        return jsonify(error_response)
+
+# Entity info endpoint is already defined at line 347
+
 # Dictionary of political terms for generating sample word clouds
 POLITICAL_TERMS = {
     'economic': ['market', 'economy', 'taxes', 'budget', 'inflation', 'jobs', 'growth', 'debt', 'deficit', 'trade', 'investment', 'regulation', 'subsidies', 'privatization', 'austerity'],
@@ -339,104 +528,6 @@ def get_nearest_words():
         },
         'nearest_words': nearest_words
     })
-
-@app.route('/api/hybrid-visualization')
-def get_hybrid_visualization():
-    """
-    Generate a hybrid visualization combining entity-level and word-level data.
-    
-    Query parameters:
-    - entity_type: Type of entity to focus on (movement, politician)
-    - entity_name: Name of entity to focus on
-    - num_words: Number of words to include (default: 100)
-    - max_distance: Maximum distance for word inclusion (default: 0.5)
-    """
-    if LATENT_SPACE is None or LATENT_SPACE.word_embedding_store is None:
-        return jsonify({
-            'error': 'Hybrid latent space not available',
-            'message': 'The hybrid latent space has not been properly initialized. Please check server configuration.'
-        }), 503
-    
-    # Get query parameters
-    entity_type = request.args.get('entity_type', 'movement')
-    entity_name = request.args.get('entity_name')
-    num_words = int(request.args.get('num_words', 100))
-    max_distance = float(request.args.get('max_distance', 0.5))
-    
-    # Create base visualization with entities
-    selected_entity = None
-    if entity_type and entity_name:
-        selected_entity = {'type': entity_type, 'name': entity_name}
-    
-    # Generate the hybrid visualization directly from the latent space
-    try:
-        # Get the hybrid visualization data
-        hybrid_data = LATENT_SPACE.get_hybrid_visualization_data(
-            entity_type=entity_type,
-            entity_name=entity_name,
-            num_words=num_words,
-            max_distance=max_distance
-        )
-        
-        # If the latent space doesn't have the hybrid visualization method,
-        # fall back to the old approach
-        if hybrid_data is None:
-            # Generate the entity visualization
-            galaxy_fig = create_galaxy_visualization(DATA, selected_entity=selected_entity)
-            
-            # If entity is specified, add word-level data
-            if entity_type and entity_name:
-                entity_key = f"{entity_type}:{entity_name}"
-                if 'embeddings' in DATA and entity_key in DATA['embeddings']:
-                    # Get entity embedding
-                    query_embedding = DATA['embeddings'][entity_key]
-                    
-                    # Find nearest words
-                    nearest_words = EMBEDDING_STORE.get_nearest_words(
-                        query_embedding, 
-                        top_n=num_words,
-                        max_distance=max_distance
-                    )
-                    
-                    # Extract word data for visualization
-                    words = [w['word'] for w in nearest_words]
-                    distances = [w['distance'] for w in nearest_words]
-                    
-                    # Add word trace to visualization
-                    if 'data' in galaxy_fig:
-                        word_trace = {
-                            'x': [w['position'][0] if 'position' in w and isinstance(w['position'], list) else 0 for w in nearest_words],
-                            'y': [w['position'][1] if 'position' in w and isinstance(w['position'], list) and len(w['position']) > 1 else 0 for w in nearest_words],
-                            'z': [w['position'][2] if 'position' in w and isinstance(w['position'], list) and len(w['position']) > 2 else 0 for w in nearest_words],
-                            'text': words,
-                            'mode': 'markers+text',
-                            'marker': {
-                                'size': [10 * (1 - d) for d in distances],  # Size inversely proportional to distance
-                                'color': 'rgba(100, 100, 255, 0.7)',
-                                'line': {'width': 1, 'color': 'white'}
-                            },
-                            'textfont': {
-                                'size': 8,
-                                'color': 'rgba(100, 100, 255, 1)'
-                            },
-                            'name': 'Related Words',
-                            'hoverinfo': 'text',
-                            'hovertext': [f"{w}: {d:.3f}" for w, d in zip(words, distances)]
-                        }
-                        galaxy_fig['data'].append(word_trace)
-            
-            # Convert to JSON
-            return json.dumps(galaxy_fig, cls=plotly.utils.PlotlyJSONEncoder)
-        else:
-            # Convert the hybrid data to JSON
-            return json.dumps(hybrid_data, cls=plotly.utils.PlotlyJSONEncoder)
-            
-    except Exception as e:
-        print(f"Error generating hybrid visualization: {e}")
-        return jsonify({
-            'error': 'Failed to generate hybrid visualization',
-            'message': str(e)
-        }), 500
 
 @app.route('/api/word-cloud/entity')
 def get_entity_word_cloud():

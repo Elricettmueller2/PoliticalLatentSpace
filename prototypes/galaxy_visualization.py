@@ -37,7 +37,7 @@ def load_data(json_path):
         data = json.load(f)
     return data
 
-def create_galaxy_visualization(data, output_path=None, random_seed=42, selected_entity=None):
+def create_galaxy_visualization(data, output_path=None, random_seed=42, selected_entity=None, hybrid_mode=False, num_words=50):
     """
     Create a 3D visualization of the political latent space with fixed orthogonal axes
     representing the German political landscape.
@@ -47,6 +47,8 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
     - output_path: Path to save the HTML output (optional)
     - random_seed: Random seed for reproducibility
     - selected_entity: Dictionary with 'type' and 'name' of the entity to highlight with projection lines
+    - hybrid_mode: If True, creates a focused visualization on the selected entity and its relationships
+    - num_words: Number of words to include in the word cloud (for hybrid mode)
     
     Returns:
     - Plotly figure object
@@ -141,46 +143,160 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
     movement_embeddings_standardized = all_embeddings_standardized[:len(movement_embeddings)]
     politician_embeddings_standardized = all_embeddings_standardized[len(movement_embeddings):]
 
-    # --- Dimensionality Reduction (UMAP) ---
-    # Check if we have enough data for UMAP (needs at least 2 samples)
-    if len(all_embeddings_standardized) >= 2:
-        # Project the data into the new space
-        # Use a higher n_neighbors to create more global structure, better preserving the political landscape
-        # Use a lower min_dist to better separate clusters of political entities
-        n_neighbors = min(30, len(all_embeddings_standardized)-1)
-        # UMAP requires at least 2 neighbors
-        n_neighbors = max(2, n_neighbors)
+    # --- Direct Mapping to Political Dimensions ---
+    # Instead of using UMAP, we'll directly map entities to our defined political dimensions
+    # based on their expert dimension scores
+    print("Using expert dimension scores for direct political dimension mapping")
+    
+    # Define the political dimensions we want to use
+    political_dimensions = ['economic_axis', 'social_axis', 'ecological_axis']
+    
+    # Create empty arrays for positions
+    movement_positions = np.zeros((len(movement_names), 3))
+    politician_positions = np.zeros((len(politician_names), 3))
+    
+    # Map movements to positions based on expert dimension scores
+    for i, name in enumerate(movement_names):
+        movement_data = data['movements'][name]
+        dim_scores = movement_data.get('position', {}).get('expert_dimensions', {}).get('axes', {})
         
-        try:
-            umap_model = UMAP(n_components=3, random_state=random_seed, n_neighbors=n_neighbors, min_dist=0.05)
-            all_embeddings_3d = umap_model.fit_transform(all_embeddings_standardized)
-        except Exception as e:
-            print(f"UMAP dimensionality reduction failed: {e}")
-            # Fallback to simple projection if UMAP fails
-            if all_embeddings_standardized.shape[1] >= 3:
-                # Use first 3 dimensions
-                all_embeddings_3d = all_embeddings_standardized[:, :3]
-            else:
-                # Pad with zeros to get 3D
-                pad_width = [(0, 0), (0, 3 - all_embeddings_standardized.shape[1])]
-                all_embeddings_3d = np.pad(all_embeddings_standardized, pad_width, mode='constant')
-    else:
-        # Not enough data for UMAP, create simple 3D positions
-        print("Not enough data for UMAP, creating simple 3D positions")
-        all_embeddings_3d = np.array([[0, 0, 0]] * len(all_embeddings_standardized))
+        # Default position at origin if no scores available
+        position = [0, 0, 0]
         
-    movement_positions = all_embeddings_3d[:len(movement_embeddings)]
-    politician_positions = all_embeddings_3d[len(movement_embeddings):]
-
-    # --- Center the data cloud around the origin (0,0,0) for camera rotation ---
-    center_of_mass = np.mean(np.vstack((movement_positions, politician_positions)), axis=0)
-    movement_positions -= center_of_mass
-    politician_positions -= center_of_mass
+        # Map each dimension to its corresponding axis
+        for dim_idx, dim_name in enumerate(political_dimensions):
+            if dim_idx < 3 and dim_name in dim_scores:  # Ensure we only use first 3 dimensions
+                # Convert score from 0-1 range to -1 to 1 range for better visualization
+                # (assuming original scores are in 0-1 range)
+                score = dim_scores[dim_name]
+                position[dim_idx] = score * 2 - 1  # Convert 0-1 to -1-1
+        
+        movement_positions[i] = position
+    
+    # Map politicians to positions based on expert dimension scores
+    for i, name in enumerate(politician_names):
+        politician_data = data['politicians'][name]
+        dim_scores = politician_data.get('position', {}).get('expert_dimensions', {}).get('axes', {})
+        
+        # Default position at origin if no scores available
+        position = [0, 0, 0]
+        
+        # Map each dimension to its corresponding axis
+        for dim_idx, dim_name in enumerate(political_dimensions):
+            if dim_idx < 3 and dim_name in dim_scores:  # Ensure we only use first 3 dimensions
+                # Convert score from 0-1 range to -1 to 1 range for better visualization
+                score = dim_scores[dim_name]
+                position[dim_idx] = score * 2 - 1  # Convert 0-1 to -1-1
+        
+        politician_positions[i] = position
+    
+    # If we have no valid positions (all zeros), add some random jitter to avoid everything at origin
+    if np.all(movement_positions == 0) and np.all(politician_positions == 0):
+        print("No expert dimension scores found, adding random jitter")
+        movement_positions = np.random.uniform(-0.5, 0.5, movement_positions.shape)
+        politician_positions = np.random.uniform(-0.5, 0.5, politician_positions.shape)
+    
+    # Scale the positions to a reasonable range for visualization
+    max_range = 1.0  # Keep positions in a standardized -1 to 1 range
 
     # --- Visualization Setup ---
     fig = go.Figure()
     movement_position_map = {name: pos for name, pos in zip(movement_names, movement_positions)}
     movement_colors = {name: f'hsl({(i * 60) % 360}, 80%, 50%)' for i, name in enumerate(movement_names)}
+    
+    # --- Handle Hybrid Mode ---
+    # If hybrid mode is enabled and we have a selected entity, focus the visualization on that entity
+    focused_entity = None
+    focused_entity_position = None
+    related_entities = []
+    
+    if hybrid_mode and selected_entity:
+        entity_type = selected_entity.get('type')
+        entity_name = selected_entity.get('name')
+        
+        # Find the selected entity and its position
+        if entity_type == 'movement' and entity_name in movement_names:
+            idx = movement_names.index(entity_name)
+            focused_entity = {'name': entity_name, 'type': 'movement', 'position': movement_positions[idx]}
+            focused_entity_position = movement_positions[idx]
+            
+            # Find related politicians (those belonging to this movement)
+            for i, politician_movement in enumerate(politician_movements):
+                if politician_movement == entity_name:
+                    related_entities.append({
+                        'name': politician_names[i],
+                        'type': 'politician',
+                        'position': politician_positions[i],
+                        'relation': 'member'
+                    })
+                    
+        elif entity_type == 'politician' and entity_name in politician_names:
+            idx = politician_names.index(entity_name)
+            focused_entity = {'name': entity_name, 'type': 'politician', 'position': politician_positions[idx]}
+            focused_entity_position = politician_positions[idx]
+            
+            # Find the movement this politician belongs to
+            movement_name = politician_movements[idx]
+            if movement_name in movement_names:
+                movement_idx = movement_names.index(movement_name)
+                related_entities.append({
+                    'name': movement_name,
+                    'type': 'movement',
+                    'position': movement_positions[movement_idx],
+                    'relation': 'belongs_to'
+                })
+                
+                # Find other politicians in the same movement
+                for i, pol_movement in enumerate(politician_movements):
+                    if pol_movement == movement_name and politician_names[i] != entity_name:
+                        related_entities.append({
+                            'name': politician_names[i],
+                            'type': 'politician',
+                            'position': politician_positions[i],
+                            'relation': 'colleague'
+                        })
+        
+        # If we found the focused entity, adjust the visualization
+        if focused_entity_position is not None:
+            # We'll keep track of which entities to include in the hybrid visualization
+            include_movements = set()
+            include_politicians = set()
+            
+            # Always include the focused entity
+            if focused_entity['type'] == 'movement':
+                include_movements.add(focused_entity['name'])
+            else:
+                include_politicians.add(focused_entity['name'])
+                
+            # Include related entities
+            for entity in related_entities:
+                if entity['type'] == 'movement':
+                    include_movements.add(entity['name'])
+                else:
+                    include_politicians.add(entity['name'])
+            
+            # Filter movement and politician positions for hybrid view
+            hybrid_movement_positions = []
+            hybrid_movement_names = []
+            hybrid_politician_positions = []
+            hybrid_politician_names = []
+            
+            for i, name in enumerate(movement_names):
+                if name in include_movements:
+                    hybrid_movement_positions.append(movement_positions[i])
+                    hybrid_movement_names.append(name)
+                    
+            for i, name in enumerate(politician_names):
+                if name in include_politicians:
+                    hybrid_politician_positions.append(politician_positions[i])
+                    hybrid_politician_names.append(name)
+            
+            # Replace the original lists with filtered ones for hybrid mode
+            if hybrid_mode:
+                movement_positions = np.array(hybrid_movement_positions) if hybrid_movement_positions else np.array([])
+                movement_names = hybrid_movement_names
+                politician_positions = np.array(hybrid_politician_positions) if hybrid_politician_positions else np.array([])
+                politician_names = hybrid_politician_names
 
     # --- 1. Add Starry Background ---
     stars = np.random.rand(1000, 3) * 20 - 10
@@ -241,32 +357,21 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
     # Instead of data-driven axes, we use fixed axes that better represent
     # the German political landscape
     axis_vectors = {}
-    
-    # Define the three main axes as perfectly orthogonal unit vectors
-    # X axis - Economic: Market Liberal (+) to Statist/Social Democratic (-)
-    # Y axis - Social: Progressive (+) to Conservative (-)
-    # Z axis - Ecological: Green (+) to Industrial (-)
     fixed_axes = {
-        'economic_axis': np.array([1.0, 0.0, 0.0]),  # X axis
-        'social_axis': np.array([0.0, 1.0, 0.0]),     # Y axis
-        'ecological_axis': np.array([0.0, 0.0, 1.0])  # Z axis
+        'economic_axis': np.array([1.0, 0.0, 0.0]),  # X axis: Market Liberal (+) to Social Democratic (-)
+        'social_axis': np.array([0.0, 1.0, 0.0]),     # Y axis: Progressive (+) to Conservative (-)
+        'ecological_axis': np.array([0.0, 0.0, 1.0])  # Z axis: Green (+) to Industrial (-)
     }
     
-    # Define axis labels that better represent German political context
+    # Define axis labels
     axis_labels = {
-        'economic_axis': {
-            'positive': 'Market Liberal',
-            'negative': 'Social Democratic'
-        },
-        'social_axis': {
-            'positive': 'Progressive',
-            'negative': 'Conservative'
-        },
-        'ecological_axis': {
-            'positive': 'Green',
-            'negative': 'Industrial'
-        }
+        'economic_axis': {'positive': 'Market Liberal', 'negative': 'Social Democratic'},
+        'social_axis': {'positive': 'Progressive', 'negative': 'Conservative'},
+        'ecological_axis': {'positive': 'Green', 'negative': 'Industrial'}
     }
+    
+    # Ensure the political dimensions match our fixed axes
+    political_dimensions = ['economic_axis', 'social_axis', 'ecological_axis']
     
     for dim_name in axes_to_draw:
         if dim_name not in fixed_axes:
@@ -432,10 +537,12 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
                 scale_factor = 0.25 * max_range * weight
                 
                 # Position is movement position + scaled dimension vector
+                # Now we're explicitly mapping each dimension to its corresponding axis
+                # Economic dimension (X), Social dimension (Y), Ecological dimension (Z)
                 word_pos = [
-                    movement_pos[0] + dim_scores[0] * scale_factor,  # Economic dimension (X)
-                    movement_pos[1] + dim_scores[1] * scale_factor,  # Social dimension (Y)
-                    movement_pos[2] + dim_scores[2] * scale_factor   # Ecological dimension (Z)
+                    movement_pos[0] + dim_scores[0] * scale_factor,  # Economic axis (X)
+                    movement_pos[1] + dim_scores[1] * scale_factor,  # Social axis (Y)
+                    movement_pos[2] + dim_scores[2] * scale_factor   # Ecological axis (Z)
                 ]
                 
                 # Add jitter to prevent exact overlaps (increased jitter)
@@ -600,52 +707,13 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
             # Define fixed axis endpoints for projection lines
             # These are the actual axes in 3D space
             axis_endpoints = {
-                'economic': (np.array([1, 0, 0]) * max_range * 0.8, np.array([-1, 0, 0]) * max_range * 0.8),  # X-axis
-                'social': (np.array([0, 1, 0]) * max_range * 0.8, np.array([0, -1, 0]) * max_range * 0.8),    # Y-axis
-                'ecological': (np.array([0, 0, 1]) * max_range * 0.8, np.array([0, 0, -1]) * max_range * 0.8)  # Z-axis
+                'economic_axis': (np.array([1, 0, 0]) * max_range * 0.8, np.array([-1, 0, 0]) * max_range * 0.8),  # X-axis
+                'social_axis': (np.array([0, 1, 0]) * max_range * 0.8, np.array([0, -1, 0]) * max_range * 0.8),    # Y-axis
+                'ecological_axis': (np.array([0, 0, 1]) * max_range * 0.8, np.array([0, 0, -1]) * max_range * 0.8)  # Z-axis
             }
             
-            # Draw projection lines to each axis
-            for dim_name, (pos_end, neg_end) in axis_endpoints.items():
-                if dim_name not in entity_dim_scores:
-                    continue
-                
-                # Get the normalized score for this dimension
-                score = entity_dim_scores[dim_name]
-                
-                # Determine which axis this is (X, Y, or Z)
-                axis_index = -1
-                if dim_name == 'economic':
-                    axis_index = 0  # X-axis
-                elif dim_name == 'social':
-                    axis_index = 1  # Y-axis
-                elif dim_name == 'ecological':
-                    axis_index = 2  # Z-axis
-                
-                if axis_index < 0:
-                    continue
-                
-                # Create a projection point directly on the axis
-                # This ensures the projection is exactly where it should be
-                projection_point = np.zeros(3)
-                projection_point[axis_index] = score * max_range * 0.8
-                
-                # Get axis color
-                axis_color = axis_colors.get(dim_name, 'rgba(255, 255, 255, 0.8)')
-                
-                # Draw projection line with increased visibility
-                fig.add_trace(go.Scatter3d(
-                    x=[selected_pos[0], projection_point[0]], 
-                    y=[selected_pos[1], projection_point[1]], 
-                    z=[selected_pos[2], projection_point[2]],
-                    mode='lines', 
-                    line=dict(color=axis_color, width=4, dash='dash'),
-                    hoverinfo='text',
-                    hovertext=f"Projection to {dim_name.replace('_', ' ').title()}: {score:.2f}",
-                    showlegend=False
-                ))
-                
-                # Calculate offset for the label
+            # Create projection lines for each axis
+            for axis_index, (axis_name, axis_endpoints_pair) in enumerate(axis_endpoints.items()):
                 # Create a perpendicular offset that's consistent for each axis
                 offset_vector = np.zeros(3)
                 
@@ -653,12 +721,26 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
                 if axis_index == 0:  # X-axis (Economic)
                     offset_vector[1] = 0.15 * max_range  # Offset in Y direction
                     offset_vector[2] = 0.05 * max_range  # Small offset in Z
+                    axis_color = 'rgba(255, 0, 0, 0.8)'  # Red for economic
                 elif axis_index == 1:  # Y-axis (Social)
                     offset_vector[0] = 0.15 * max_range  # Offset in X direction
                     offset_vector[2] = 0.05 * max_range  # Small offset in Z
+                    axis_color = 'rgba(0, 0, 255, 0.8)'  # Blue for social
                 else:  # Z-axis (Ecological)
                     offset_vector[0] = 0.05 * max_range  # Small offset in X
                     offset_vector[1] = 0.15 * max_range  # Offset in Y direction
+                    axis_color = 'rgba(0, 255, 0, 0.8)'  # Green for ecological
+                
+                # Get the dimension score for this axis
+                dim_name = axis_name.replace('_axis', '')
+                score = entity_dim_scores.get(dim_name, 0)
+                
+                # Calculate projection point on this axis
+                # The axis endpoints are at max_range * 0.8 in each direction
+                # So we scale the score (-1 to 1) to get the projection point
+                axis_vector = np.zeros(3)
+                axis_vector[axis_index] = score * max_range * 0.8
+                projection_point = axis_vector
                 
                 # Format the value to display
                 display_value = f"{score:.2f}"
@@ -687,6 +769,17 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
                     marker=dict(size=8, color=axis_color, symbol='diamond', opacity=1.0),
                     hoverinfo='text', 
                     hovertext=f"{dim_name.replace('_', ' ').title()}: {score:.2f}",
+                    showlegend=False
+                ))
+                
+                # Draw line from origin to projection point
+                fig.add_trace(go.Scatter3d(
+                    x=[0, projection_point[0]], 
+                    y=[0, projection_point[1]], 
+                    z=[0, projection_point[2]],
+                    mode='lines', 
+                    line=dict(color=axis_color, width=4, dash='dot'),
+                    hoverinfo='none',
                     showlegend=False
                 ))
     
