@@ -202,7 +202,53 @@ def create_galaxy_visualization(data, output_path=None, random_seed=42, selected
     # --- Visualization Setup ---
     fig = go.Figure()
     movement_position_map = {name: pos for name, pos in zip(movement_names, movement_positions)}
-    movement_colors = {name: f'hsl({(i * 60) % 360}, 80%, 50%)' for i, name in enumerate(movement_names)}
+    
+    # Define official party colors for German political parties
+    party_colors = {
+        # Original case versions
+        'AfD': 'rgb(0, 102, 153)',
+        'CDU': 'rgb(0, 0, 0)',
+        'SPD': 'rgb(230, 0, 27)',
+        'LINKE': 'rgb(112, 0, 58)',
+        'CSU': 'rgb(0, 126, 199)',
+        'FDP': 'rgb(255, 240, 23)',
+        'Grüne': 'rgb(5, 150, 39)',
+        'Die Grünen': 'rgb(5, 150, 39)',
+        'Bündnis 90/Die Grünen': 'rgb(5, 150, 39)',
+        
+        # Lowercase versions (as seen in the visualization)
+        'afd': 'rgb(0, 102, 153)',
+        'cdu': 'rgb(0, 0, 0)',
+        'spd': 'rgb(230, 0, 27)',
+        'linke': 'rgb(112, 0, 58)',
+        'csu': 'rgb(0, 126, 199)',
+        'fdp': 'rgb(255, 240, 23)',
+        'grüne': 'rgb(5, 150, 39)'
+    }
+    
+    # Assign colors to movements, using official party colors where available
+    # and falling back to a default color scheme for other movements
+    movement_colors = {}
+    for name in movement_names:
+        # Check for exact match or case-insensitive partial match
+        exact_match = party_colors.get(name)
+        if exact_match:
+            movement_colors[name] = exact_match
+            continue
+            
+        # Try to find a partial match (e.g., if 'CDU/CSU' should match 'CDU')
+        matched = False
+        for party, color in party_colors.items():
+            if party in name or name in party:
+                movement_colors[name] = color
+                matched = True
+                break
+                
+        # Fall back to default color scheme if no match found
+        if not matched:
+            # Generate a color based on the index to ensure consistency
+            idx = movement_names.index(name)
+            movement_colors[name] = f'hsl({(idx * 60) % 360}, 80%, 50%)'
     
     # --- Handle Hybrid Mode ---
     # If hybrid mode is enabled and we have a selected entity, focus the visualization on that entity
