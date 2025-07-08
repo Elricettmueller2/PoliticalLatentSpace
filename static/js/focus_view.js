@@ -469,16 +469,23 @@ function storeNodePositions(nodes) {
     });
 }
 
-// Helper function to position terms using clustering
 function positionTerms(terms, width, height) {
-    // Group terms by semantic similarity
+    // Create more distinct clusters based on position data
     const clusters = {};
     
+    // Define cluster precision - lower value means fewer, larger clusters
+    const clusterPrecision = 4; // Number of clusters per dimension
+    
     terms.forEach(term => {
-        // Use the first dimension as a simple clustering key if available
-        let clusterKey = 0;
-        if (term.position && term.position.length > 0) {
-            clusterKey = Math.floor(term.position[0] * 5) / 5;
+        // Default cluster key
+        let clusterKey = '0-0-0';
+        
+        if (term.position && term.position.length >= 3) {
+            // Create a cluster key based on discretized position values
+            const clusterIndices = term.position.map(pos => 
+                Math.floor(pos * clusterPrecision) / clusterPrecision
+            );
+            clusterKey = clusterIndices.join('-');
         }
         
         if (!clusters[clusterKey]) clusters[clusterKey] = [];
@@ -487,19 +494,83 @@ function positionTerms(terms, width, height) {
     
     // Position terms by cluster
     let positioned = [];
-    Object.entries(clusters).forEach(([key, clusterTerms], i) => {
-        const angle = (i / Object.keys(clusters).length) * 2 * Math.PI;
-        const clusterX = width/2 + Math.cos(angle) * 300;
-        const clusterY = height/2 + Math.sin(angle) * 300;
+    const clusterKeys = Object.keys(clusters);
+    
+    // Calculate cluster positions using a more even distribution
+    // Use a spiral layout for clusters to ensure better spread
+    clusterKeys.forEach((key, i) => {
+        const clusterTerms = clusters[key];
+        
+        // Parse the cluster key to get position information
+        const clusterPos = key.split('-').map(Number);
+        
+        // Base cluster position on the average of term positions
+        let avgX = 0, avgY = 0, avgZ = 0;
+        let validPositions = 0;
+        
+        clusterTerms.forEach(term => {
+            if (term.position && term.position.length >= 3) {
+                avgX += term.position[0];
+                avgY += term.position[1];
+                avgZ += term.position[2];
+                validPositions++;
+            }
+        });
+        
+        if (validPositions > 0) {
+            avgX /= validPositions;
+            avgY /= validPositions;
+            avgZ /= validPositions;
+        } else {
+            // Fallback if no valid positions
+            avgX = 0.5;
+            avgY = 0.5;
+            avgZ = 0.5;
+        }
+        
+        // Convert from [0,1] range to actual screen coordinates
+        // Use the first two dimensions for x,y and the third for radius
+        const baseX = width * (0.2 + 0.6 * avgX);
+        const baseY = height * (0.2 + 0.6 * avgY);
+        
+        // Use the third dimension to determine distance from center
+        // This creates a 3D-like effect in 2D space
+        const distanceFromCenter = 100 + 300 * avgZ;
+        
+        // Calculate final cluster position
+        // Move from center point outward based on the cluster's position
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const vectorX = baseX - centerX;
+        const vectorY = baseY - centerY;
+        const vectorLength = Math.sqrt(vectorX * vectorX + vectorY * vectorY) || 1;
+        
+        const clusterX = centerX + (vectorX / vectorLength) * distanceFromCenter;
+        const clusterY = centerY + (vectorY / vectorLength) * distanceFromCenter;
+        
+        // Position terms within the cluster
+        const clusterRadius = 20 + Math.sqrt(clusterTerms.length) * 15;
         
         clusterTerms.forEach((term, j) => {
-            const radius = 50 + j * 15;
-            const termAngle = angle + (j / clusterTerms.length - 0.5) * Math.PI/4;
+            // Arrange terms in a spiral within each cluster
+            const angle = (j / clusterTerms.length) * Math.PI * 2;
+            const spiralFactor = 1 + (j / clusterTerms.length) * 0.5;
+            const distance = clusterRadius * spiralFactor * (0.3 + 0.7 * (j / clusterTerms.length));
+            
+            // Add some variation based on term's exact position if available
+            let offsetX = Math.cos(angle) * distance;
+            let offsetY = Math.sin(angle) * distance;
+            
+            if (term.position && term.position.length >= 2) {
+                // Add some jitter based on the term's exact position
+                offsetX += (term.position[0] - avgX) * clusterRadius * 2;
+                offsetY += (term.position[1] - avgY) * clusterRadius * 2;
+            }
             
             positioned.push({
                 ...term,
-                x: clusterX + Math.cos(termAngle) * radius,
-                y: clusterY + Math.sin(termAngle) * radius
+                x: clusterX + offsetX,
+                y: clusterY + offsetY
             });
         });
     });

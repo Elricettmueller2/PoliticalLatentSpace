@@ -9,6 +9,7 @@ from pathlib import Path
 # Import visualization and latent space functions
 from prototypes.galaxy_visualization import create_galaxy_visualization
 from src.data.embeddings.multi_level_latent_space import MultiLevelLatentSpace
+from src.data.embeddings.chunked_embedding_store import ChunkedEmbeddingStore
 
 app = Flask(__name__)
 
@@ -17,6 +18,8 @@ print("Loading and processing data...")
 
 # Direct path to the multi_level_analysis_results.json file
 ANALYSIS_RESULTS_PATH = 'src/data/processed/multi_level_analysis_results.json'
+WORD_EMBEDDING_PATH = 'src/data/processed/word_embeddings.h5'
+WORD_INDEX_PATH = 'src/data/processed/word_embeddings.index'
 
 # Load the data directly from the JSON file
 DATA = {}
@@ -38,9 +41,53 @@ except Exception as e:
     print(f"Error loading data: {e}")
     DATA = {'movements': {}, 'politicians': {}, 'embeddings': {}}
 
-# No word embeddings in this simplified version
+# Initialize embedding store and latent space
 EMBEDDING_STORE = None
 LATENT_SPACE = None
+
+try:
+    # Check if word embeddings file exists
+    if os.path.exists(WORD_EMBEDDING_PATH) and os.path.exists(WORD_INDEX_PATH):
+        print(f"Loading word embeddings from {WORD_EMBEDDING_PATH}...")
+        EMBEDDING_STORE = ChunkedEmbeddingStore(
+            WORD_EMBEDDING_PATH,
+            index_file=WORD_INDEX_PATH,
+            cache_size=1000,
+            verbose=True
+        )
+        print("Word embeddings loaded successfully")
+        
+        # Initialize latent space
+        print("Initializing latent space...")
+        LATENT_SPACE = MultiLevelLatentSpace(
+            entity_data_path=ANALYSIS_RESULTS_PATH,
+            word_embedding_path=WORD_EMBEDDING_PATH,
+            index_file=WORD_INDEX_PATH,
+            verbose=True
+        )
+        print("Latent space initialized successfully")
+        
+        # Check if entities have embeddings
+        print("Checking entity embeddings...")
+        sample_movement = next(iter(DATA.get('movements', {}).keys()), None)
+        sample_politician = next(iter(DATA.get('politicians', {}).keys()), None)
+        
+        if sample_movement:
+            movement_embedding = LATENT_SPACE.get_entity_embedding('movement', sample_movement)
+            print(f"Sample movement '{sample_movement}' has embedding: {movement_embedding is not None}")
+            
+        if sample_politician:
+            politician_embedding = LATENT_SPACE.get_entity_embedding('politician', sample_politician)
+            print(f"Sample politician '{sample_politician}' has embedding: {politician_embedding is not None}")
+    else:
+        print(f"Word embeddings file not found at {WORD_EMBEDDING_PATH}")
+        print(f"Index file not found at {WORD_INDEX_PATH}")
+        print("Running with fallback word clouds only")
+except Exception as e:
+    print(f"Error initializing embedding store: {e}")
+    import traceback
+    traceback.print_exc()
+    print("Running with fallback word clouds only")
 
 print("Data loading complete.")
 
@@ -103,6 +150,8 @@ def get_entity_focus():
     entity_name = request.args.get('entity_name')
     num_words = int(request.args.get('num_words', 50))
     
+    print(f"\n--- Entity Focus Request: {entity_type} {entity_name} ---")
+    
     if not entity_type or not entity_name:
         return jsonify({
             'error': True,
@@ -112,9 +161,9 @@ def get_entity_focus():
     try:
         # Get entity data
         entity_data = None
-        if entity_type == 'movement' and entity_name in DATA.get('movements', {}):
+        if entity_type == 'movement' and entity_name in DATA.get('movements', {}).keys():
             entity_data = DATA['movements'][entity_name]
-        elif entity_type == 'politician' and entity_name in DATA.get('politicians', {}):
+        elif entity_type == 'politician' and entity_name in DATA.get('politicians', {}).keys():
             entity_data = DATA['politicians'][entity_name]
         
         if not entity_data:
@@ -180,21 +229,84 @@ def get_entity_focus():
                             'similarity': 0.7  # Placeholder for colleague similarity
                         })
         
-        # Get word cloud data
-        word_cloud = entity_data.get('word_cloud', {})
-        if not word_cloud:  # If word cloud is empty, generate sample data
-            word_cloud = generate_word_cloud(entity_type, entity_name)
-        
-        # Format word cloud for visualization
+        # Get word cloud data - Try to use embeddings first, fall back to static data if needed
         word_cloud_viz = []
-        for term, weight in word_cloud.items():
-            # Get position for the term if available in WORD_DIMENSION_SCORES
-            position = WORD_DIMENSION_SCORES.get(term.lower(), [0, 0, 0])
-            word_cloud_viz.append({
-                'text': term,
-                'value': weight,
-                'position': position
-            })
+        
+        # Try to get word cloud from latent space first
+        if LATENT_SPACE and EMBEDDING_STORE:
+            try:
+                print(f"Attempting to get word cloud for {entity_type} {entity_name} from embeddings...")
+                
+                # Debug: Check entity embedding
+                entity_embedding = LATENT_SPACE.get_entity_embedding(entity_type, entity_name)
+                if entity_embedding is not None:
+                    print(f"Entity embedding shape: {entity_embedding.shape}")
+                    print(f"Entity embedding norm: {np.linalg.norm(entity_embedding)}")
+                    print(f"Entity embedding sample: {entity_embedding[:5]}")
+                    
+                    # Debug: Check a few word embeddings
+                    if EMBEDDING_STORE:
+                        print("Checking word embeddings...")
+                        sample_words = ["politik", "demokratie", "wirtschaft"]
+                        for word in sample_words:
+                            word_emb = EMBEDDING_STORE.get_word_embedding(word)
+                            if word_emb is not None:
+                                print(f"Word '{word}' embedding norm: {np.linalg.norm(word_emb)}")
+                                # Calculate cosine similarity
+                                similarity = np.dot(entity_embedding, word_emb) / (np.linalg.norm(entity_embedding) * np.linalg.norm(word_emb))
+                                print(f"Similarity to '{entity_name}': {similarity}")
+                            else:
+                                print(f"No embedding for word '{word}'")
+                
+                # Use the dedicated word cloud method with very high max_distance
+                word_cloud_data = LATENT_SPACE.get_word_cloud_for_entity(
+                    entity_type,
+                    entity_name,
+                    top_n=num_words,
+                    max_distance=10.0  # Very high to see if we get any results
+                )
+                
+                print(f"Found {len(word_cloud_data)} words for word cloud")
+                if len(word_cloud_data) > 0:
+                    print(f"First few words: {[w['text'] for w in word_cloud_data[:5]]}")
+                
+                # Format for visualization
+                for word_item in word_cloud_data:
+                    word = word_item['text']
+                    similarity = word_item['value']  # Already converted from distance
+                    
+                    # Get position for the term if available in WORD_DIMENSION_SCORES
+                    position = WORD_DIMENSION_SCORES.get(word.lower(), [0, 0, 0])
+                    
+                    word_cloud_viz.append({
+                        'text': word,
+                        'value': similarity,
+                        'position': position
+                    })
+                
+                print(f"Generated word cloud with {len(word_cloud_viz)} words from embeddings")
+            except Exception as e:
+                print(f"Error generating word cloud from embeddings: {e}")
+                import traceback
+                traceback.print_exc()
+                # Will fall back to static data
+        
+        # If no words were found using embeddings, use fallback method
+        if not word_cloud_viz:
+            print("Using fallback word cloud generation")
+            word_cloud = entity_data.get('word_cloud', {})
+            if not word_cloud:  # If word cloud is empty, generate sample data
+                word_cloud = generate_word_cloud(entity_type, entity_name)
+            
+            # Format word cloud for visualization
+            for term, weight in word_cloud.items():
+                # Get position for the term if available in WORD_DIMENSION_SCORES
+                position = WORD_DIMENSION_SCORES.get(term.lower(), [0, 0, 0])
+                word_cloud_viz.append({
+                    'text': term,
+                    'value': weight,
+                    'position': position
+                })
         
         # Sort by value for importance
         word_cloud_viz.sort(key=lambda x: x['value'], reverse=True)
@@ -225,7 +337,6 @@ def get_entity_focus():
             'error': True,
             'message': f"Failed to generate entity focus view: {str(e)}"
         })
-
 
 @app.route('/api/hybrid-visualization')
 def get_hybrid_visualization():
@@ -513,8 +624,9 @@ def get_nearest_words():
         }), 400
     
     # Find nearest words
-    nearest_words = EMBEDDING_STORE.get_nearest_words(
-        query_embedding, 
+    nearest_words = LATENT_SPACE.get_word_cloud_for_entity(
+        entity_type,
+        entity_name,
         top_n=top_n,
         max_distance=max_distance
     )
@@ -569,8 +681,9 @@ def get_entity_word_cloud():
     query_embedding = DATA['embeddings'][entity_key]
     
     # Find nearest words
-    nearest_words = EMBEDDING_STORE.get_nearest_words(
-        query_embedding, 
+    nearest_words = LATENT_SPACE.get_word_cloud_for_entity(
+        entity_type,
+        entity_name,
         top_n=top_n,
         max_distance=max_distance
     )
@@ -578,7 +691,7 @@ def get_entity_word_cloud():
     # Format for word cloud
     word_cloud_data = [
         {
-            'text': w['word'],
+            'text': w['text'],
             'value': 1.0 - w['distance'],  # Convert distance to similarity
             'distance': w['distance']
         }

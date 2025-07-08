@@ -261,7 +261,7 @@ class MultiLevelLatentSpace:
                                  entity_type: str, 
                                  entity_name: str,
                                  top_n: int = 100,
-                                 max_distance: float = 0.5) -> List[Dict[str, Any]]:
+                                 max_distance: float = 5.0) -> List[Dict[str, Any]]:
         """
         Generate word cloud data for a specific entity.
         
@@ -282,22 +282,172 @@ class MultiLevelLatentSpace:
         if entity_embedding is None:
             return []
         
-        # Find nearest words
+        # Normalize the entity embedding to have the same magnitude as word embeddings
+        entity_norm = np.linalg.norm(entity_embedding)
+        if entity_norm > 0:
+            # Scale up to have norm around 1.7 (similar to word embeddings)
+            entity_embedding = entity_embedding * (1.7 / entity_norm)
+            if self.verbose:
+                print(f"Normalized entity embedding norm: {np.linalg.norm(entity_embedding)}")
+        
+        # Find nearest words - request more than we need so we can filter
         nearest_words = self.word_embedding_store.get_nearest_words(
             entity_embedding,
-            top_n=top_n,
+            top_n=top_n * 2,  # Get more words than needed for filtering
             max_distance=max_distance
         )
         
-        # Format for word cloud
-        word_cloud_data = [
-            {
-                'text': w['word'],
-                'value': 1.0 - w['distance'],  # Convert distance to similarity
-                'distance': w['distance']
-            }
-            for w in nearest_words
+        # Filter out words that are likely not relevant to politics
+        # Common German political terms and concepts
+        political_prefixes = [
+            'politik', 'demokrat', 'sozial', 'wirtschaft', 'recht', 'gesetz', 'staat', 
+            'partei', 'wahl', 'bürger', 'regierung', 'opposition', 'parlament', 'bundestag',
+            'reform', 'steuer', 'arbeit', 'umwelt', 'klima', 'migration', 'flüchtling',
+            'europa', 'nation', 'international', 'sicherheit', 'freiheit', 'gerechtigkeit'
         ]
+        
+        # Prioritize words that match political prefixes but don't exclude others completely
+        prioritized_words = []
+        other_words = []
+        
+        for word_data in nearest_words:
+            word = word_data['word'].lower()
+            is_political = False
+            
+            # Check if the word starts with any political prefix
+            for prefix in political_prefixes:
+                if word.startswith(prefix) or prefix in word:
+                    is_political = True
+                    break
+            
+            if is_political:
+                prioritized_words.append(word_data)
+            else:
+                other_words.append(word_data)
+        
+        # Combine prioritized words with other words, up to top_n total
+        # Ensure we always include at least 50% of top_n words regardless of political relevance
+        min_other_words = max(top_n // 2, top_n - len(prioritized_words))
+        filtered_words = prioritized_words + other_words[:min_other_words]
+        filtered_words = filtered_words[:top_n]
+        
+        if self.verbose:
+            print(f"Found {len(prioritized_words)} political terms out of {len(nearest_words)} total words")
+        
+        # Format for word cloud with more meaningful value scaling
+        word_cloud_data = []
+        max_similarity = 0
+        min_similarity = 1
+        
+        # First pass to find min and max similarity values
+        for w in filtered_words:
+            similarity = 1.0 - (w['distance'] / max_distance)
+            max_similarity = max(max_similarity, similarity)
+            min_similarity = min(min_similarity, similarity)
+        
+        # Second pass to create word cloud data with normalized values
+        for w in filtered_words:
+            similarity = 1.0 - (w['distance'] / max_distance)
+            
+            # Normalize to 0-1 range and then scale to 0.3-1.0 range to ensure visibility
+            normalized_value = 0.3
+            if similarity_range > 0:
+                normalized_value = 0.3 + 0.7 * ((similarity - min_similarity) / similarity_range)
+            
+            # Generate meaningful position values based on the word's embedding
+            # Default to a random position if we can't calculate a meaningful one
+            # Use a deterministic seed based on the word to ensure consistency
+            word_lower = w['word'].lower()
+            word_hash = sum(ord(c) * (i+1) for i, c in enumerate(word_lower))
+            np.random.seed(word_hash)
+            
+            # Default random position with good spread
+            position = [
+                0.2 + 0.6 * np.random.random(),  # Economic axis (0.2-0.8)
+                0.2 + 0.6 * np.random.random(),  # Social axis (0.2-0.8)
+                0.2 + 0.6 * np.random.random()   # Ecological axis (0.2-0.8)
+            ]
+
+            if self.word_embedding_store is not None:
+                word_embedding = self.word_embedding_store.get_word_embedding(word_lower)
+                
+                if word_embedding is not None and entity_embedding is not None:
+                    # Calculate the projection of the word embedding onto the entity embedding
+                    entity_norm = np.linalg.norm(entity_embedding)
+                    word_norm = np.linalg.norm(word_embedding)
+                    
+                    if entity_norm > 0 and word_norm > 0:
+                        # Calculate cosine similarity for the base relationship
+                        cos_sim = np.dot(word_embedding, entity_embedding) / (word_norm * entity_norm)
+                        
+                        # Create a PCA-like approach for finding principal directions
+                        # First axis is the entity direction
+                        axis1 = entity_embedding / entity_norm
+                        
+                        # Find a component of the word embedding orthogonal to axis1
+                        word_proj = np.dot(word_embedding, axis1) * axis1
+                        ortho_component = word_embedding - word_proj
+                        ortho_norm = np.linalg.norm(ortho_component)
+                        
+                        if ortho_norm > 1e-6:
+                            # Second axis is the orthogonal component direction
+                            axis2 = ortho_component / ortho_norm
+                            
+                            # Third axis is orthogonal to both
+                            axis3 = np.cross(axis1[:3], axis2[:3])  # Use first 3 dimensions for cross product
+                            if len(axis3) < len(axis1):
+                                # Pad axis3 if needed
+                                axis3 = np.pad(axis3, (0, len(axis1) - len(axis3)))
+                            
+                            axis3_norm = np.linalg.norm(axis3)
+                            if axis3_norm > 1e-6:
+                                axis3 = axis3 / axis3_norm
+                            else:
+                                # Fallback to a random orthogonal vector
+                                axis3 = np.random.randn(len(axis1))
+                                axis3 = axis3 - np.dot(axis3, axis1) * axis1
+                                axis3 = axis3 - np.dot(axis3, axis2) * axis2
+                                axis3_norm = np.linalg.norm(axis3)
+                                if axis3_norm > 1e-6:
+                                    axis3 = axis3 / axis3_norm
+                        else:
+                            # If orthogonal component is too small, create random orthogonal axes
+                            # Create a random vector
+                            axis2 = np.random.randn(len(axis1))
+                            # Make it orthogonal to axis1
+                            axis2 = axis2 - np.dot(axis2, axis1) * axis1
+                            axis2_norm = np.linalg.norm(axis2)
+                            if axis2_norm > 1e-6:
+                                axis2 = axis2 / axis2_norm
+                            
+                            # Create third orthogonal axis
+                            axis3 = np.cross(axis1[:3], axis2[:3])
+                            if len(axis3) < len(axis1):
+                                axis3 = np.pad(axis3, (0, len(axis1) - len(axis3)))
+                            axis3_norm = np.linalg.norm(axis3)
+                            if axis3_norm > 1e-6:
+                                axis3 = axis3 / axis3_norm
+                        
+                        # Project the word embedding onto these axes
+                        proj1 = np.dot(word_embedding, axis1)
+                        proj2 = np.dot(word_embedding, axis2)
+                        proj3 = np.dot(word_embedding, axis3)
+                        
+                        # Apply a non-linear transformation to spread out values
+                        # and normalize to [0,1] range for visualization
+                        position = [
+                            (np.tanh(proj1 * 2) + 1) / 2,  # Economic axis (0-1)
+                            (np.tanh(proj2 * 2) + 1) / 2,  # Social axis (0-1)
+                            (np.tanh(proj3 * 2) + 1) / 2   # Ecological axis (0-1)
+                        ]
+            
+            word_cloud_data.append({
+                'text': w['word'],
+                'value': normalized_value,
+                'distance': w['distance'],
+                'raw_similarity': similarity,
+                'position': position
+            })
         
         return word_cloud_data
     
