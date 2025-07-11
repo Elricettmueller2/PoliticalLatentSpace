@@ -95,12 +95,12 @@ function createFocusVisualization(data, containerId) {
         // Determine node size based on term weight
         const size = 5 + term.value * 10;
         
-        // Add the node
+        // Add the node with improved styling for visibility
         nodes.push({
             id: `term-${term.text}`,
             name: term.text,
             type: 'term',
-            size: size,
+            size: size * 1.5, // Make terms larger for better visibility
             color: getTermColor(term),
             x: term.x,
             y: term.y,
@@ -141,8 +141,8 @@ function createFocusVisualization(data, containerId) {
         textposition: 'bottom center',
         textfont: {
             family: 'Arial',
-            size: nodes.map(node => node.type === 'term' ? 10 : 14),
-            color: nodes.map(node => node.type === 'term' ? '#ddd' : '#fff')
+            size: nodes.map(node => node.type === 'term' ? 12 : 14),
+            color: nodes.map(node => node.type === 'term' ? '#ffffff' : '#fff')
         },
         hoverinfo: 'text',
         hovertext: nodes.map(node => {
@@ -477,108 +477,67 @@ function storeNodePositions(nodes) {
 }
 
 function positionTerms(terms, width, height) {
-    // Create more distinct clusters based on position data
-    const clusters = {};
+    // Create a spiral layout that preserves semantic relationships
+    let positioned = [];
     
-    // Define cluster precision - lower value means fewer, larger clusters
-    const clusterPrecision = 4; // Number of clusters per dimension
+    // Center of the visualization
+    const centerX = width / 2;
+    const centerY = height / 2;
     
-    terms.forEach(term => {
-        // Default cluster key
-        let clusterKey = '0-0-0';
+    // Calculate the maximum radius for the spiral
+    const maxRadius = Math.min(width, height) * 0.35;
+    
+    // Sort terms by importance for better placement
+    const sortedTerms = [...terms].sort((a, b) => b.value - a.value);
+    
+    // Golden angle for optimal spiral distribution
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    
+    // Position each term
+    sortedTerms.forEach((term, index) => {
+        // Default position variables
+        let x, y;
+        
+        // Start with a base angle and radius for the spiral
+        let angle, radius;
         
         if (term.position && term.position.length >= 3) {
-            // Create a cluster key based on discretized position values
-            const clusterIndices = term.position.map(pos => 
-                Math.floor(pos * clusterPrecision) / clusterPrecision
+            // Use the semantic position data to influence placement
+            // position[0] and position[1] determine the angle
+            // position[2] influences the distance from center
+            
+            // Map position[0] and position[1] to an angle
+            // This preserves semantic relationships between words
+            const angleFromPosition = Math.atan2(
+                term.position[1] - 0.5,
+                term.position[0] - 0.5
             );
-            clusterKey = clusterIndices.join('-');
-        }
-        
-        if (!clusters[clusterKey]) clusters[clusterKey] = [];
-        clusters[clusterKey].push(term);
-    });
-    
-    // Position terms by cluster
-    let positioned = [];
-    const clusterKeys = Object.keys(clusters);
-    
-    // Calculate cluster positions using a more even distribution
-    // Use a spiral layout for clusters to ensure better spread
-    clusterKeys.forEach((key, i) => {
-        const clusterTerms = clusters[key];
-        
-        // Parse the cluster key to get position information
-        const clusterPos = key.split('-').map(Number);
-        
-        // Base cluster position on the average of term positions
-        let avgX = 0, avgY = 0, avgZ = 0;
-        let validPositions = 0;
-        
-        clusterTerms.forEach(term => {
-            if (term.position && term.position.length >= 3) {
-                avgX += term.position[0];
-                avgY += term.position[1];
-                avgZ += term.position[2];
-                validPositions++;
-            }
-        });
-        
-        if (validPositions > 0) {
-            avgX /= validPositions;
-            avgY /= validPositions;
-            avgZ /= validPositions;
+            
+            // Use position[2] to influence the distance from center
+            const distanceFactor = term.position[2];
+            
+            // Calculate final angle and radius
+            angle = angleFromPosition + (index * 0.1); // Add small increment to avoid overlap
+            radius = maxRadius * (0.2 + 0.6 * distanceFactor) * Math.sqrt(index / sortedTerms.length);
         } else {
-            // Fallback if no valid positions
-            avgX = 0.5;
-            avgY = 0.5;
-            avgZ = 0.5;
+            // Fallback to pure spiral layout if no position data
+            angle = index * goldenAngle;
+            radius = maxRadius * 0.4 * Math.sqrt(index / sortedTerms.length);
         }
         
-        // Convert from [0,1] range to actual screen coordinates
-        // Use the first two dimensions for x,y and the third for radius
-        const baseX = width * (0.2 + 0.6 * avgX);
-        const baseY = height * (0.2 + 0.6 * avgY);
+        // Calculate coordinates
+        x = centerX + radius * Math.cos(angle);
+        y = centerY + radius * Math.sin(angle);
         
-        // Use the third dimension to determine distance from center
-        // This creates a 3D-like effect in 2D space
-        const distanceFromCenter = 100 + 300 * avgZ;
+        // Ensure positions stay within bounds
+        x = Math.max(50, Math.min(width - 50, x));
+        y = Math.max(50, Math.min(height - 50, y));
         
-        // Calculate final cluster position
-        // Move from center point outward based on the cluster's position
-        const centerX = width / 2;
-        const centerY = height / 2;
-        const vectorX = baseX - centerX;
-        const vectorY = baseY - centerY;
-        const vectorLength = Math.sqrt(vectorX * vectorX + vectorY * vectorY) || 1;
-        
-        const clusterX = centerX + (vectorX / vectorLength) * distanceFromCenter;
-        const clusterY = centerY + (vectorY / vectorLength) * distanceFromCenter;
-        
-        // Position terms within the cluster
-        const clusterRadius = 20 + Math.sqrt(clusterTerms.length) * 15;
-        
-        clusterTerms.forEach((term, j) => {
-            // Arrange terms in a spiral within each cluster
-            const angle = (j / clusterTerms.length) * Math.PI * 2;
-            const spiralFactor = 1 + (j / clusterTerms.length) * 0.5;
-            const distance = clusterRadius * spiralFactor * (0.3 + 0.7 * (j / clusterTerms.length));
-            
-            // Add some variation based on term's exact position if available
-            let offsetX = Math.cos(angle) * distance;
-            let offsetY = Math.sin(angle) * distance;
-            
-            if (term.position && term.position.length >= 2) {
-                // Add some jitter based on the term's exact position
-                offsetX += (term.position[0] - avgX) * clusterRadius * 2;
-                offsetY += (term.position[1] - avgY) * clusterRadius * 2;
-            }
-            
-            positioned.push({
-                ...term,
-                x: clusterX + offsetX,
-                y: clusterY + offsetY
-            });
+        // Add the positioned term
+        positioned.push({
+            ...term,
+            x: x,
+            y: y
         });
     });
     
@@ -840,10 +799,26 @@ function applyFilters() {
     
     // Filter nodes based on entity type and similarity threshold
     const visibleNodes = allNodes.filter(node => {
+        // Always show the focus entity
         if (node.fixed === true) return true;
+        
+        // Filter by entity type if specified
         if (entityTypeFilter !== 'all' && node.type !== entityTypeFilter) return false;
-        if (node.type !== 'term' && node.similarity < similarityThreshold) return false;
+        
+        // For non-term entities, apply similarity threshold
+        if (node.type !== 'term' && node.similarity !== undefined && node.similarity < similarityThreshold) return false;
+        
+        // Always show terms unless specifically filtered out by entity type
         return true;
+    });
+    
+    // Debug node filtering
+    console.log('Node filtering details:', {
+        totalNodes: allNodes.length,
+        visibleNodes: visibleNodes.length,
+        termNodes: visibleNodes.filter(n => n.type === 'term').length,
+        entityTypeFilter: entityTypeFilter,
+        similarityThreshold: similarityThreshold
     });
     
     console.log('Filtered nodes:', { 
@@ -885,8 +860,8 @@ function applyFilters() {
         textposition: 'bottom center',
         textfont: {
             family: 'Arial',
-            size: visibleNodes.map(node => node.type === 'term' ? 10 : 14),
-            color: visibleNodes.map(node => node.type === 'term' ? '#ddd' : '#fff')
+            size: visibleNodes.map(node => node.type === 'term' ? 12 : 14),
+            color: visibleNodes.map(node => node.type === 'term' ? '#ffffff' : '#fff')
         },
         hoverinfo: 'text',
         hovertext: visibleNodes.map(node => {

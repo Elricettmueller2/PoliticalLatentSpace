@@ -1,0 +1,21 @@
+entity_type,entity_name,similarity
+politician,GregorGysi,0.5030012651801791
+movement,cdu,0.49917523500296
+politician,DorotheeBär,0.4942035994925155
+movement,csu,0.4933139791720063
+movement,grüne,0.4918649513941984
+movement,fdp,0.48913992165938325
+movement,spd,0.4862274239743529
+movement,afd,0.48605714196015565
+movement,linke,0.48527208772212277
+politician,AliceWeidel,0.4843690413223791
+politician,WolfgangKubicki,0.48349100953747937
+politician,CarstenLinnemann,0.4821188984446763
+politician,MatthiasMiersch,0.48210843160067324
+politician,KatharinaDröge,0.47695242073415256
+politician,FriedrichMerz,0.47632713001704113
+politician,MartinHess,0.47610909756131436
+politician,JensSpahn,0.47381315259097884
+politician,Olaf Scholz,0.47197229035039123
+politician,TinoChrupalla,0.4718280796610532
+politician,RobertHabeck,0.470653620025871

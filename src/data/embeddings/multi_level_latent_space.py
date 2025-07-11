@@ -357,18 +357,32 @@ class MultiLevelLatentSpace:
             if similarity_range > 0:
                 normalized_value = 0.3 + 0.7 * ((similarity - min_similarity) / similarity_range)
             
-            # Generate meaningful position values based on the word's embedding
-            # Default to a random position if we can't calculate a meaningful one
-            # Use a deterministic seed based on the word to ensure consistency
+            # Generate position values with significant variation based on entity
             word_lower = w['word'].lower()
-            word_hash = sum(ord(c) * (i+1) for i, c in enumerate(word_lower))
-            np.random.seed(word_hash)
             
-            # Default random position with good spread
+            # Create a unique seed for each word-entity combination
+            # Use entity name as the primary factor for positioning
+            entity_chars = [ord(c) for c in entity_name]
+            entity_hash = sum(entity_chars)
+            entity_factor = (entity_hash % 100) / 100.0  # Value between 0-1 based on entity
+            
+            # Use a different random seed for each entity
+            np.random.seed(entity_hash)
+            
+            # Generate base positions that vary significantly by entity
+            entity_base_x = np.random.random() * 0.4  # Base position for this entity (0-0.4)
+            entity_base_y = np.random.random() * 0.4  # Base position for this entity (0-0.4)
+            entity_base_z = np.random.random() * 0.4  # Base position for this entity (0-0.4)
+            
+            # Now add word-specific variation on top of entity base
+            word_hash = sum(ord(c) * (i+1) for i, c in enumerate(word_lower))
+            np.random.seed(word_hash + entity_hash)
+            
+            # Position with entity-specific base plus word variation
             position = [
-                0.2 + 0.6 * np.random.random(),  # Economic axis (0.2-0.8)
-                0.2 + 0.6 * np.random.random(),  # Social axis (0.2-0.8)
-                0.2 + 0.6 * np.random.random()   # Ecological axis (0.2-0.8)
+                entity_base_x + 0.3 * np.random.random() + 0.3 * entity_factor,  # Economic axis 
+                entity_base_y + 0.3 * np.random.random() + 0.3 * entity_factor,  # Social axis
+                entity_base_z + 0.3 * np.random.random() + 0.3 * entity_factor   # Ecological axis
             ]
 
             if self.word_embedding_store is not None:
