@@ -13,6 +13,7 @@ function createFocusVisualization(data, containerId) {
     // Extract data
     const focusEntity = data.entity;
     const relatedEntities = data.related_entities;
+    const referenceMovements = data.reference_movements || [];
     const wordCloud = data.word_cloud;
     
     // Set up the visualization dimensions
@@ -88,6 +89,89 @@ function createFocusVisualization(data, containerId) {
         });
     });
     
+    // Add reference movements as more visible nodes
+    console.log('Reference movements:', referenceMovements);
+    
+    // Define party colors for better visibility
+    const partyColors = {
+        'afd': '#009ee0',      // Blue
+        'cdu': '#000000',      // Black
+        'fdp': '#ffed00',      // Yellow
+        'gruene': '#46962b',   // Green
+        'linke': '#be3075',    // Pink/Purple
+        'spd': '#e3000f',      // Red
+        'default': '#888888'   // Gray for unknown parties
+    };
+    
+    referenceMovements.forEach((movement) => {
+        // Calculate position based on political dimensions
+        let x, y;
+        
+        // Debug each movement
+        console.log('Processing movement:', movement.name, movement);
+        
+        // Check if position data exists directly in the movement object
+        if (movement.position && 
+            movement.position.economic_axis !== undefined && 
+            movement.position.social_axis !== undefined) {
+            
+            // Position based on political dimensions
+            const econPos = movement.position.economic_axis * 2 - 1;
+            const socialPos = movement.position.social_axis * 2 - 1;
+            
+            x = width / 2 + econPos * (width / 3);
+            y = height / 2 - socialPos * (height / 3); // Invert Y for correct orientation
+            
+            console.log(`Movement ${movement.name} positioned at ${x},${y}`);
+            
+            // Get party color or default to gray
+            const color = partyColors[movement.name.toLowerCase()] || partyColors.default;
+            
+            // Add as a reference node with distinct styling
+            nodes.push({
+                id: `ref-${movement.type}-${movement.name}`,
+                name: movement.name,
+                type: 'reference_movement',
+                size: 15,  // Larger size for visibility
+                color: color,
+                x: x,
+                y: y,
+                opacity: 0.9,  // More visible
+                position: movement.position
+            });
+        } else if (movement.data && movement.data.position && 
+                  movement.data.position.economic_axis !== undefined && 
+                  movement.data.position.social_axis !== undefined) {
+            
+            // Try to get position from data property
+            const econPos = movement.data.position.economic_axis * 2 - 1;
+            const socialPos = movement.data.position.social_axis * 2 - 1;
+            
+            x = width / 2 + econPos * (width / 3);
+            y = height / 2 - socialPos * (height / 3); // Invert Y for correct orientation
+            
+            console.log(`Movement ${movement.name} positioned at ${x},${y} (from data)`);
+            
+            // Get party color or default to gray
+            const color = partyColors[movement.name.toLowerCase()] || partyColors.default;
+            
+            // Add as a reference node with distinct styling
+            nodes.push({
+                id: `ref-${movement.type}-${movement.name}`,
+                name: movement.name,
+                type: 'reference_movement',
+                size: 15,  // Larger size for visibility
+                color: color,
+                x: x,
+                y: y,
+                opacity: 0.9,  // More visible
+                position: movement.data.position
+            });
+        } else {
+            console.log(`Movement ${movement.name} has no position data`);
+        }
+    });
+    
     // Position and add word cloud terms using clustering with improved layout
     const positionedTerms = positionTerms(wordCloud.slice(0, 50), width, height);
     
@@ -152,7 +236,7 @@ function createFocusVisualization(data, containerId) {
             } else if (node.type === 'politician') {
                 return `Politician: ${node.name}<br>Movement: ${node.movement || 'Unknown'}${formatPositionForHover(node.position)}`;
             } else {
-                return `Term: ${node.name}<br>Weight: ${node.value.toFixed(2)}`;
+                return `Term: ${node.name}<br>Weight: ${node.value ? node.value.toFixed(2) : 'N/A'}`;
             }
         }),
         ids: nodes.map(node => node.id)
@@ -1169,7 +1253,7 @@ function addWordCloudLegend(container) {
     
     // Style the legend
     legend.style.position = 'absolute';
-    legend.style.top = '20px';
+    legend.style.top = '50px';
     legend.style.left = '20px';
     legend.style.backgroundColor = 'rgba(40, 40, 40, 0.85)';
     legend.style.padding = '12px';

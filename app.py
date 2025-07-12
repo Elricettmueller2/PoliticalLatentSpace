@@ -196,6 +196,32 @@ def get_entity_focus():
     if word_cloud is None:
         word_cloud = [] # Default to empty list if no cloud can be generated
 
+    # Add all movements as reference points
+    all_movements = []
+    print("\nAdding reference movements:")
+    for movement_name, movement_data in DATA.get('movements', {}).items():
+        if movement_name.lower() != entity_name.lower():  # Skip if it's the focus entity
+            # Extract position data directly to the top level for easier access in frontend
+            position_data = movement_data.get('position', {})
+            print(f"Movement: {movement_name}, Position data: {position_data}")
+            
+            # Ensure we have proper position data
+            if 'economic_axis' not in position_data or 'social_axis' not in position_data:
+                # Use default values if missing
+                position_data = {
+                    'economic_axis': 0.5,  # Center by default
+                    'social_axis': 0.5    # Center by default
+                }
+                print(f"  Using default position for {movement_name}: {position_data}")
+            
+            movement_info = {
+                'type': 'movement',
+                'name': movement_name,
+                'is_reference': True,  # Flag to mark as reference point
+                'position': position_data
+            }
+            all_movements.append(movement_info)
+    
     # Prepare response
     response = {
         'entity': {
@@ -204,6 +230,7 @@ def get_entity_focus():
             'data': entity_data
         },
         'related_entities': related_entities,
+        'reference_movements': all_movements,
         'word_cloud': word_cloud
     }
     
