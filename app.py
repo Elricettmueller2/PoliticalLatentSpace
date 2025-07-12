@@ -19,10 +19,22 @@ app = Flask(__name__)
 # --- Data Loading and Pre-computation ---
 print("Loading and processing data...")
 
-# Direct path to the multi_level_analysis_results.json file
-ANALYSIS_RESULTS_PATH = 'src/data/processed/multi_level_analysis_results.json'
-WORD_EMBEDDING_PATH = 'src/data/processed/word_embeddings.h5'
-WORD_INDEX_PATH = 'src/data/processed/word_embeddings.index'
+# Use absolute paths based on the location of this script
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ANALYSIS_RESULTS_PATH = os.path.join(BASE_DIR, 'src/data/processed/multi_level_analysis_results.json')
+WORD_EMBEDDING_PATH = os.path.join(BASE_DIR, 'src/data/processed/word_embeddings.h5')
+WORD_INDEX_PATH = os.path.join(BASE_DIR, 'src/data/processed/word_embeddings.index')
+
+# Enhanced debugging for cross-platform compatibility
+print(f"Current working directory: {os.getcwd()}")
+print(f"Application directory: {BASE_DIR}")
+print(f"Checking file existence and sizes:")
+for path in [ANALYSIS_RESULTS_PATH, WORD_EMBEDDING_PATH, WORD_INDEX_PATH]:
+    if os.path.exists(path):
+        size = os.path.getsize(path)
+        print(f"  - {path}: EXISTS, size={size/1024/1024:.2f} MB")
+    else:
+        print(f"  - {path}: NOT FOUND")
 
 # Load the data directly from the JSON file
 DATA = {}
@@ -31,8 +43,35 @@ try:
     with open(ANALYSIS_RESULTS_PATH, 'r', encoding='utf-8') as f:
         DATA = json.load(f)
     print(f"Data loaded successfully with keys: {list(DATA.keys())}")
+    if 'movements' in DATA:
+        print(f"Found {len(DATA['movements'])} movements")
+        # Debug: Check first movement for embedding
+        first_movement = next(iter(DATA['movements'].items()))
+        print(f"First movement: {first_movement[0]}")
+        print(f"Has embedding: {'embedding' in first_movement[1]}")
+        if 'embedding' in first_movement[1]:
+            print(f"Embedding type: {type(first_movement[1]['embedding'])}")
+            print(f"Embedding length: {len(first_movement[1]['embedding'])}")
+            
+    if 'politicians' in DATA:
+        print(f"Found {len(DATA['politicians'])} politicians")
+        # Debug: Check first politician for embedding
+        first_politician = next(iter(DATA['politicians'].items()))
+        print(f"First politician: {first_politician[0]}")
+        print(f"Has embedding: {'embedding' in first_politician[1]}")
+        if 'embedding' in first_politician[1]:
+            print(f"Embedding type: {type(first_politician[1]['embedding'])}")
+            print(f"Embedding length: {len(first_politician[1]['embedding'])}")
+    
+    # Initialize empty embeddings dictionary if needed
+    if 'embeddings' not in DATA:
+        DATA['embeddings'] = {}
+        
 except Exception as e:
     print(f"Error loading data: {e}")
+    import traceback
+    traceback.print_exc()
+    DATA = {'movements': {}, 'politicians': {}, 'embeddings': {}}
     # Initialize with empty data if file not found
     DATA = {'movements': {}, 'politicians': {}}
 
@@ -43,6 +82,84 @@ print(f"Found {len(DATA.get('politicians', {}))} politicians")
 # Load word embeddings
 EMBEDDING_STORE = None
 try:
+    # Check if word embeddings file exists
+    if os.path.exists(WORD_EMBEDDING_PATH) and os.path.exists(WORD_INDEX_PATH):
+        print(f"Loading word embeddings from {WORD_EMBEDDING_PATH}...")
+        try:
+            import h5py
+            with h5py.File(WORD_EMBEDDING_PATH, 'r') as f:
+                print(f"HDF5 file structure: {list(f.keys())}")
+                if 'words' in f:
+                    print(f"Words dataset shape: {f['words'].shape}")
+                if 'embeddings' in f:
+                    print(f"Embeddings dataset shape: {f['embeddings'].shape}")
+        except Exception as e:
+            print(f"Error inspecting HDF5 file: {e}")
+            traceback.print_exc()
+            
+        try:
+            import faiss
+            index = faiss.read_index(WORD_INDEX_PATH)
+            print(f"FAISS index loaded successfully, dimension: {index.d}, ntotal: {index.ntotal}")
+        except Exception as e:
+            print(f"Error loading FAISS index: {e}")
+            traceback.print_exc()
+            
+        EMBEDDING_STORE = ChunkedEmbeddingStore(
+            WORD_EMBEDDING_PATH,
+            index_file=WORD_INDEX_PATH,
+            cache_size=1000,
+            verbose=True
+        )
+        print("Word embeddings loaded successfully")
+        
+        # Initialize latent space
+        print("Initializing latent space...")
+        LATENT_SPACE = MultiLevelLatentSpace(
+            entity_data_path=ANALYSIS_RESULTS_PATH,
+            word_embedding_path=WORD_EMBEDDING_PATH,
+            index_file=WORD_INDEX_PATH,
+            verbose=True
+        )
+        print("Latent space initialized successfully")
+        
+        # Check if entities have embeddings
+        print("Checking entity embeddings...")
+        sample_movement = next(iter(DATA.get('movements', {}).keys()), None)
+        sample_politician = next(iter(DATA.get('politicians', {}).keys()), None)
+        
+        if sample_movement:
+            movement_embedding = LATENT_SPACE.get_entity_embedding('movement', sample_movement)
+            print(f"Sample movement '{sample_movement}' has embedding: {movement_embedding is not None}")
+            
+        if sample_politician:
+            politician_embedding = LATENT_SPACE.get_entity_embedding('politician', sample_politician)
+            print(f"Sample politician '{sample_politician}' has embedding: {politician_embedding is not None}")
+            
+        # Populate DATA['embeddings'] with entity embeddings from the latent space
+        print("Populating embeddings dictionary...")
+        # Add movement embeddings
+        for movement_name in DATA.get('movements', {}):
+            embedding = LATENT_SPACE.get_entity_embedding('movement', movement_name)
+            if embedding is not None:
+                DATA['embeddings'][f"movement:{movement_name}"] = embedding
+                
+        # Add politician embeddings
+        for politician_name in DATA.get('politicians', {}):
+            embedding = LATENT_SPACE.get_entity_embedding('politician', politician_name)
+            if embedding is not None:
+                DATA['embeddings'][f"politician:{politician_name}"] = embedding
+                
+        print(f"Populated embeddings dictionary with {len(DATA['embeddings'])} entity embeddings")
+    else:
+        print(f"Word embeddings file not found at {WORD_EMBEDDING_PATH}")
+        print(f"Index file not found at {WORD_INDEX_PATH}")
+        print("Running with fallback word clouds only")
+except Exception as e:
+    print(f"Error initializing embedding store: {e}")
+    import traceback
+    traceback.print_exc()
+    print("Running with fallback word clouds only")
     print(f"Loading word embeddings from {WORD_EMBEDDING_PATH}...")
     EMBEDDING_STORE = ChunkedEmbeddingStore(WORD_EMBEDDING_PATH, WORD_INDEX_PATH)
     print("Word embeddings loaded successfully")
