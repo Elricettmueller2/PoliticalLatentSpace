@@ -88,32 +88,33 @@ function createFocusVisualization(data, containerId) {
         });
     });
     
-    // Position and add word cloud terms using clustering
+    // Position and add word cloud terms using clustering with improved layout
     const positionedTerms = positionTerms(wordCloud.slice(0, 50), width, height);
     
     positionedTerms.forEach((term) => {
-        // Determine node size based on term weight
-        const size = 5 + term.value * 10;
+        // Determine node size based on term weight with improved non-linear scaling
+        const size = 5 + Math.pow(term.value, 1.5) * 15; // Non-linear scaling for better differentiation
         
         // Add the node with improved styling for visibility
         nodes.push({
             id: `term-${term.text}`,
             name: term.text,
             type: 'term',
-            size: size * 1.5, // Make terms larger for better visibility
-            color: getTermColor(term),
+            size: size, // Improved size scaling
+            color: term.color || getTermColor(term), // Use pre-assigned color from positioning function
             x: term.x,
             y: term.y,
             value: term.value,
+            distance: term.distance || 0,
             position: term.position || []
         });
         
-        // Add a thin link from the focus entity to this term
+        // Add a link from the focus entity to this term with opacity based on similarity
         links.push({
             source: `${focusEntity.type}-${focusEntity.name}`,
             target: `term-${term.text}`,
-            value: 1, // Thin links for terms
-            color: 'rgba(200, 200, 200, 0.1)'
+            value: Math.max(1, term.value * 3), // Thicker links for more important terms
+            color: `rgba(200, 200, 200, ${term.value * 0.7})` // More opacity for important terms
         });
     });
     
@@ -313,6 +314,9 @@ function createFocusVisualization(data, containerId) {
     // Add relationship indicators
     addRelationshipIndicators(links, nodes, layout);
     
+    // Add word cloud legend to the visualization
+    addWordCloudLegend(container);
+    
     // Create the plot
     Plotly.newPlot(containerId, [trace], layout, {
         responsive: true,
@@ -477,67 +481,73 @@ function storeNodePositions(nodes) {
 }
 
 function positionTerms(terms, width, height) {
-    // Create a spiral layout that preserves semantic relationships
+    // Create a more interpretable layout that organizes terms by similarity
     let positioned = [];
     
     // Center of the visualization
     const centerX = width / 2;
     const centerY = height / 2;
     
-    // Calculate the maximum radius for the spiral
-    const maxRadius = Math.min(width, height) * 0.35;
+    // Calculate the maximum radius for the layout
+    const maxRadius = Math.min(width, height) * 0.4;
     
     // Sort terms by importance for better placement
     const sortedTerms = [...terms].sort((a, b) => b.value - a.value);
     
-    // Golden angle for optimal spiral distribution
+    // Group terms by value ranges for better organization
+    const valueRanges = [
+        { min: 0.8, max: 1.0, radius: 0.2, color: '#d32f2f' }, // Very high similarity - closest to center, red
+        { min: 0.6, max: 0.8, radius: 0.4, color: '#f57c00' }, // High similarity - orange
+        { min: 0.4, max: 0.6, radius: 0.6, color: '#fbc02d' }, // Medium similarity - yellow
+        { min: 0.2, max: 0.4, radius: 0.8, color: '#388e3c' }, // Low similarity - green
+        { min: 0.0, max: 0.2, radius: 1.0, color: '#1976d2' }  // Very low similarity - blue
+    ];
+    
+    // Golden angle for optimal distribution within each group
     const goldenAngle = Math.PI * (3 - Math.sqrt(5));
     
-    // Position each term
-    sortedTerms.forEach((term, index) => {
-        // Default position variables
-        let x, y;
-        
-        // Start with a base angle and radius for the spiral
-        let angle, radius;
-        
-        if (term.position && term.position.length >= 3) {
-            // Use the semantic position data to influence placement
-            // position[0] and position[1] determine the angle
-            // position[2] influences the distance from center
-            
-            // Map position[0] and position[1] to an angle
-            // This preserves semantic relationships between words
-            const angleFromPosition = Math.atan2(
-                term.position[1] - 0.5,
-                term.position[0] - 0.5
-            );
-            
-            // Use position[2] to influence the distance from center
-            const distanceFactor = term.position[2];
-            
-            // Calculate final angle and radius
-            angle = angleFromPosition + (index * 0.1); // Add small increment to avoid overlap
-            radius = maxRadius * (0.2 + 0.6 * distanceFactor) * Math.sqrt(index / sortedTerms.length);
-        } else {
-            // Fallback to pure spiral layout if no position data
-            angle = index * goldenAngle;
-            radius = maxRadius * 0.4 * Math.sqrt(index / sortedTerms.length);
+    // Track terms by value range for positioning
+    const termsByRange = valueRanges.map(() => []);
+    
+    // Group terms by value range
+    sortedTerms.forEach(term => {
+        for (let i = 0; i < valueRanges.length; i++) {
+            const range = valueRanges[i];
+            if (term.value >= range.min && term.value < range.max) {
+                termsByRange[i].push(term);
+                break;
+            }
         }
+    });
+    
+    // Position terms by group
+    termsByRange.forEach((terms, rangeIndex) => {
+        const range = valueRanges[rangeIndex];
+        const baseRadius = maxRadius * range.radius;
         
-        // Calculate coordinates
-        x = centerX + radius * Math.cos(angle);
-        y = centerY + radius * Math.sin(angle);
-        
-        // Ensure positions stay within bounds
-        x = Math.max(50, Math.min(width - 50, x));
-        y = Math.max(50, Math.min(height - 50, y));
-        
-        // Add the positioned term
-        positioned.push({
-            ...term,
-            x: x,
-            y: y
+        terms.forEach((term, index) => {
+            // Calculate angle based on position within group
+            const angle = index * goldenAngle;
+            
+            // Add some randomness to radius to avoid perfect circles
+            const radiusVariation = 0.1; // 10% variation
+            const radius = baseRadius * (1 - radiusVariation/2 + Math.random() * radiusVariation);
+            
+            // Calculate coordinates
+            const x = centerX + radius * Math.cos(angle);
+            const y = centerY + radius * Math.sin(angle);
+            
+            // Ensure positions stay within bounds
+            const boundedX = Math.max(50, Math.min(width - 50, x));
+            const boundedY = Math.max(50, Math.min(height - 50, y));
+            
+            // Add the positioned term with color based on value range
+            positioned.push({
+                ...term,
+                x: boundedX,
+                y: boundedY,
+                color: range.color
+            });
         });
     });
     
@@ -1015,6 +1025,32 @@ function applyFilters() {
     }
 }
 
+// Function to load entity word cloud with improved parameters
+function loadEntityWordCloud(entityType, entityName) {
+    // Use our improved parameters
+    const params = new URLSearchParams({
+        entity_type: entityType,
+        entity_name: entityName.toLowerCase(), // Use lowercase to match backend keys
+        top_n: 100,
+        max_distance: 5.0,
+        filter_stopwords: true
+    });
+    
+    return fetch(`/api/word-cloud/entity?${params}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                console.error('Error loading word cloud:', data.message);
+                return [];
+            }
+            return data.word_cloud;
+        })
+        .catch(error => {
+            console.error('Error fetching word cloud:', error);
+            return [];
+        });
+}
+
 // Function to load entity focus view
 function loadEntityFocusView(entityType, entityName) {
     // Show loading indicator
@@ -1027,7 +1063,7 @@ function loadEntityFocusView(entityType, entityName) {
     document.getElementById('galaxy-container').style.display = 'none';
     document.getElementById('focus-container').style.display = 'block';
     
-    // Fetch the entity focus data
+    // First load entity data
     fetch(`/api/entity-focus?entity_type=${entityType}&entity_name=${encodeURIComponent(entityName)}`)
         .then(response => response.json())
         .then(data => {
@@ -1037,14 +1073,26 @@ function loadEntityFocusView(entityType, entityName) {
                 return;
             }
             
-            // Create the focus visualization
-            createFocusVisualization(data, 'focus-visualization');
-            
-            // Update the entity info panel
-            updateEntityInfoPanel(data.entity);
-            
-            // Show the entity info panel
-            document.getElementById('entity-info-panel').classList.add('active');
+            // Then load improved word cloud separately
+            loadEntityWordCloud(entityType, entityName)
+                .then(wordCloud => {
+                    // Combine the data
+                    data.word_cloud = wordCloud;
+                    
+                    // Create the focus visualization with improved word cloud
+                    createFocusVisualization(data, 'focus-visualization');
+                    
+                    // Update the entity info panel
+                    updateEntityInfoPanel(data.entity);
+                    
+                    // Show the entity info panel
+                    document.getElementById('entity-info-panel').classList.add('active');
+                })
+                .catch(error => {
+                    console.error('Error loading word cloud:', error);
+                    // Still show visualization with fallback word cloud
+                    createFocusVisualization(data, 'focus-visualization');
+                });
         })
         .catch(error => {
             console.error('Error fetching entity focus data:', error);
@@ -1109,6 +1157,58 @@ function updateEntityInfoPanel(entity) {
     }
     
     infoPanel.innerHTML = html;
+}
+
+// Function to add a legend for the word cloud
+function addWordCloudLegend(container) {
+    // Remove any existing legend
+    const existingLegend = container.querySelector('.word-cloud-legend');
+    if (existingLegend) {
+        existingLegend.remove();
+    }
+    
+    // Create legend container
+    const legend = document.createElement('div');
+    legend.className = 'word-cloud-legend';
+    
+    // Style the legend
+    legend.style.position = 'absolute';
+    legend.style.bottom = '20px';
+    legend.style.right = '20px';
+    legend.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+    legend.style.padding = '10px';
+    legend.style.borderRadius = '5px';
+    legend.style.boxShadow = '0 2px 5px rgba(0, 0, 0, 0.1)';
+    legend.style.fontSize = '12px';
+    legend.style.zIndex = '1000';
+    
+    // Add legend content
+    legend.innerHTML = `
+        <h4 style="margin-top: 0; margin-bottom: 8px; font-size: 14px;">Word Cloud Legend</h4>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+            <span style="display: inline-block; width: 12px; height: 12px; background-color: #d32f2f; border-radius: 50%; margin-right: 5px;"></span>
+            <span>Very High Similarity (0.8-1.0)</span>
+        </div>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+            <span style="display: inline-block; width: 12px; height: 12px; background-color: #f57c00; border-radius: 50%; margin-right: 5px;"></span>
+            <span>High Similarity (0.6-0.8)</span>
+        </div>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+            <span style="display: inline-block; width: 12px; height: 12px; background-color: #fbc02d; border-radius: 50%; margin-right: 5px;"></span>
+            <span>Medium Similarity (0.4-0.6)</span>
+        </div>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+            <span style="display: inline-block; width: 12px; height: 12px; background-color: #388e3c; border-radius: 50%; margin-right: 5px;"></span>
+            <span>Low Similarity (0.2-0.4)</span>
+        </div>
+        <div style="display: flex; align-items: center;">
+            <span style="display: inline-block; width: 12px; height: 12px; background-color: #1976d2; border-radius: 50%; margin-right: 5px;"></span>
+            <span>Very Low Similarity (0.0-0.2)</span>
+        </div>
+    `;
+    
+    // Add legend to container
+    container.appendChild(legend);
 }
 
 // Function to go back to the galaxy view

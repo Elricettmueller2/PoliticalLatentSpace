@@ -6,6 +6,14 @@ import os
 from typing import List, Dict, Any, Optional, Union, Tuple
 from pathlib import Path
 
+# Import German stopwords from analyze_latent_space.py
+try:
+    from scripts.analyze_latent_space import LatentSpaceAnalyzer
+    GERMAN_STOPWORDS = LatentSpaceAnalyzer.GERMAN_STOPWORDS
+except ImportError:
+    # Fallback if import fails
+    GERMAN_STOPWORDS = set()
+
 from .chunked_embedding_store import ChunkedEmbeddingStore
 
 
@@ -261,7 +269,8 @@ class MultiLevelLatentSpace:
                                  entity_type: str, 
                                  entity_name: str,
                                  top_n: int = 100,
-                                 max_distance: float = 5.0) -> List[Dict[str, Any]]:
+                                 max_distance: float = 5.0,
+                                 filter_stopwords: bool = True) -> List[Dict[str, Any]]:
         """
         Generate word cloud data for a specific entity.
         
@@ -270,6 +279,7 @@ class MultiLevelLatentSpace:
             entity_name: Name of the entity
             top_n: Number of words to include
             max_distance: Maximum distance threshold
+            filter_stopwords: Whether to filter out common German stopwords
             
         Returns:
             List of word cloud items
@@ -312,6 +322,13 @@ class MultiLevelLatentSpace:
         
         for word_data in nearest_words:
             word = word_data['word'].lower()
+            
+            # Skip stopwords if filtering is enabled
+            if filter_stopwords and word in GERMAN_STOPWORDS:
+                if self.verbose:
+                    print(f"Filtering stopword: {word}")
+                continue
+                
             is_political = False
             
             # Check if the word starts with any political prefix
