@@ -12,8 +12,8 @@ analysis:
 
 # Data settings
 data:
-  base_dir: 'c:/Users/elric/CascadeProjects/Uni/PoliticalLatentSpace/src/data/raw'
-  processed_dir: 'c:/Users/elric/CascadeProjects/Uni/PoliticalLatentSpace/src/data/processed'
+  base_dir: './src/data/raw'
+  processed_dir: './src/data/processed'
 
 # Latent space settings
 latent_space:
@@ -31,5 +31,5 @@ latent_space:
 
 # Output settings
 output:
-  dir: 'c:/Users/elric/CascadeProjects/Uni/PoliticalLatentSpace/src/data/processed'
+  dir: './src/data/processed'
   filename: 'political_latent_space.json'
