@@ -101,7 +101,7 @@ function createFocusVisualization(data, containerId) {
             name: term.text,
             type: 'term',
             size: size, // Improved size scaling
-            color: term.color || getTermColor(term), // Use pre-assigned color from positioning function
+            color: getTermColor(term), // Use pre-assigned color from positioning function
             x: term.x,
             y: term.y,
             value: term.value,
@@ -375,16 +375,12 @@ function getPoliticalSpectrumColor(entity) {
 
 // Helper function to get term color based on its position values
 function getTermColor(term) {
-    if (!term.position || term.position.length < 3) {
-        return 'rgba(200, 200, 200, 0.8)';
-    }
-    
-    // Use position values for RGB components
-    const r = Math.abs(term.position[0]) * 255;
-    const g = Math.abs(term.position[2]) * 255;
-    const b = Math.abs(term.position[1]) * 255;
-    
-    return `rgba(${r}, ${g}, ${b}, 0.8)`;
+    const value = term.value || 0;
+    if (value >= 0.8) return '#4dd0e1';      // Very High Similarity
+    if (value >= 0.6) return '#4db6ac';      // High Similarity
+    if (value >= 0.4) return '#81c784';      // Medium Similarity
+    if (value >= 0.2) return '#aed581';      // Low Similarity
+    return '#dce775';                       // Very Low Similarity
 }
 
 // Helper function to determine relationship type between entities
@@ -496,11 +492,11 @@ function positionTerms(terms, width, height) {
     
     // Group terms by value ranges for better organization
     const valueRanges = [
-        { min: 0.8, max: 1.0, radius: 0.2, color: '#d32f2f' }, // Very high similarity - closest to center, red
-        { min: 0.6, max: 0.8, radius: 0.4, color: '#f57c00' }, // High similarity - orange
-        { min: 0.4, max: 0.6, radius: 0.6, color: '#fbc02d' }, // Medium similarity - yellow
-        { min: 0.2, max: 0.4, radius: 0.8, color: '#388e3c' }, // Low similarity - green
-        { min: 0.0, max: 0.2, radius: 1.0, color: '#1976d2' }  // Very low similarity - blue
+        { min: 0.8, max: 1.0, radius: 0.2, color: '#4dd0e1' }, // Very high similarity - closest to center, red
+        { min: 0.6, max: 0.8, radius: 0.4, color: '#4db6ac' }, // High similarity - orange
+        { min: 0.4, max: 0.6, radius: 0.6, color: '#81c784' }, // Medium similarity - yellow
+        { min: 0.2, max: 0.4, radius: 0.8, color: '#aed581' }, // Low similarity - green
+        { min: 0.0, max: 0.2, radius: 1.0, color: '#dce775' }  // Very low similarity - blue
     ];
     
     // Golden angle for optimal distribution within each group
@@ -1173,36 +1169,37 @@ function addWordCloudLegend(container) {
     
     // Style the legend
     legend.style.position = 'absolute';
-    legend.style.bottom = '20px';
-    legend.style.right = '20px';
-    legend.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
-    legend.style.padding = '10px';
-    legend.style.borderRadius = '5px';
-    legend.style.boxShadow = '0 2px 5px rgba(0, 0, 0, 0.1)';
-    legend.style.fontSize = '12px';
+    legend.style.top = '20px';
+    legend.style.left = '20px';
+    legend.style.backgroundColor = 'rgba(40, 40, 40, 0.85)';
+    legend.style.padding = '12px';
+    legend.style.borderRadius = '8px';
+    legend.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.3)';
+    legend.style.fontSize = '13px';
+    legend.style.color = '#f0f0f0';
     legend.style.zIndex = '1000';
     
     // Add legend content
     legend.innerHTML = `
-        <h4 style="margin-top: 0; margin-bottom: 8px; font-size: 14px;">Word Cloud Legend</h4>
-        <div style="display: flex; align-items: center; margin-bottom: 4px;">
-            <span style="display: inline-block; width: 12px; height: 12px; background-color: #d32f2f; border-radius: 50%; margin-right: 5px;"></span>
+        <h4 style="margin-top: 0; margin-bottom: 10px; font-size: 15px; border-bottom: 1px solid #555; padding-bottom: 5px;">Word Cloud Legend</h4>
+        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+            <span style="display: inline-block; width: 14px; height: 14px; background-color: #4dd0e1; border-radius: 50%; margin-right: 8px;"></span>
             <span>Very High Similarity (0.8-1.0)</span>
         </div>
-        <div style="display: flex; align-items: center; margin-bottom: 4px;">
-            <span style="display: inline-block; width: 12px; height: 12px; background-color: #f57c00; border-radius: 50%; margin-right: 5px;"></span>
+        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+            <span style="display: inline-block; width: 14px; height: 14px; background-color: #4db6ac; border-radius: 50%; margin-right: 8px;"></span>
             <span>High Similarity (0.6-0.8)</span>
         </div>
-        <div style="display: flex; align-items: center; margin-bottom: 4px;">
-            <span style="display: inline-block; width: 12px; height: 12px; background-color: #fbc02d; border-radius: 50%; margin-right: 5px;"></span>
+        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+            <span style="display: inline-block; width: 14px; height: 14px; background-color: #81c784; border-radius: 50%; margin-right: 8px;"></span>
             <span>Medium Similarity (0.4-0.6)</span>
         </div>
-        <div style="display: flex; align-items: center; margin-bottom: 4px;">
-            <span style="display: inline-block; width: 12px; height: 12px; background-color: #388e3c; border-radius: 50%; margin-right: 5px;"></span>
+        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+            <span style="display: inline-block; width: 14px; height: 14px; background-color: #aed581; border-radius: 50%; margin-right: 8px;"></span>
             <span>Low Similarity (0.2-0.4)</span>
         </div>
         <div style="display: flex; align-items: center;">
-            <span style="display: inline-block; width: 12px; height: 12px; background-color: #1976d2; border-radius: 50%; margin-right: 5px;"></span>
+            <span style="display: inline-block; width: 14px; height: 14px; background-color: #dce775; border-radius: 50%; margin-right: 8px;"></span>
             <span>Very Low Similarity (0.0-0.2)</span>
         </div>
     `;

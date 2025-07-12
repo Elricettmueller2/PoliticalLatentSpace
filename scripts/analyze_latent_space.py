@@ -159,7 +159,21 @@ class LatentSpaceAnalyzer:
             
             # Limit to top_n words after filtering
             word_cloud_data = word_cloud_data[:top_n]
-            
+
+            # --- Value Normalization ---
+            # Rescale the 'value' to a more visually intuitive range (e.g., 0.1 to 1.0)
+            if word_cloud_data:
+                values = [w['value'] for w in word_cloud_data]
+                min_val, max_val = min(values), max(values)
+                
+                if max_val > min_val:
+                    # Rescale to a 0.1 - 1.0 range
+                    for w in word_cloud_data:
+                        w['value'] = 0.1 + 0.9 * (w['value'] - min_val) / (max_val - min_val)
+                else: # All values are the same
+                    for w in word_cloud_data:
+                        w['value'] = 0.5 # Assign a medium value
+
             # If we got results, return them
             if word_cloud_data:
                 return word_cloud_data

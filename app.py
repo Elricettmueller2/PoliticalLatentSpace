@@ -11,6 +11,9 @@ from prototypes.galaxy_visualization import create_galaxy_visualization
 from src.data.embeddings.multi_level_latent_space import MultiLevelLatentSpace
 from src.data.embeddings.chunked_embedding_store import ChunkedEmbeddingStore
 
+# --- This is the new import statement that brings in the correct logic ---
+from scripts.analyze_latent_space import LatentSpaceAnalyzer
+
 app = Flask(__name__)
 
 # --- Data Loading and Pre-computation ---
@@ -70,6 +73,15 @@ if sample_politician:
     print(f"Sample politician '{sample_politician}' has embedding: {has_politician_embedding}")
 
 print("Data loading complete.")
+
+# --- Initialize the Latent Space Analyzer ---
+print("Initializing Latent Space Analyzer...")
+ANALYZER = LatentSpaceAnalyzer(
+    entity_data_path=ANALYSIS_RESULTS_PATH,
+    word_embedding_path=WORD_EMBEDDING_PATH,
+    index_file=WORD_INDEX_PATH
+)
+print("Latent Space Analyzer initialized successfully.")
 
 # --- Routes ---
 
@@ -172,52 +184,18 @@ def get_entity_focus():
                     'relation': 'colleague'
                 })
     
-    # Get word cloud if embeddings are available
-    word_cloud = []
-    if EMBEDDING_STORE is not None:
-        print(f"Attempting to get word cloud for {entity_type} {entity_name} from embeddings...")
-        
-        # Get entity embedding
-        entity_embedding = LATENT_SPACE.get_entity_embedding(entity_type, entity_name)
-        
-        if entity_embedding is not None:
-            print(f"Entity embedding shape: {entity_embedding.shape}")
-            print(f"Entity embedding norm: {np.linalg.norm(entity_embedding)}")
-            print(f"Entity embedding sample: {entity_embedding[:5]}")
-            
-            # Check a few sample words for debugging
-            print("Checking word embeddings...")
-            for sample_word in ['politik', 'demokratie', 'wirtschaft']:
-                word_embedding = EMBEDDING_STORE.get_word_embedding(sample_word)
-                if word_embedding is not None:
-                    word_norm = np.linalg.norm(word_embedding)
-                    entity_norm = np.linalg.norm(entity_embedding)
-                    similarity = np.dot(word_embedding, entity_embedding) / (word_norm * entity_norm)
-                    print(f"Word '{sample_word}' embedding norm: {word_norm}")
-                    print(f"Similarity to '{entity_name}': {similarity}")
-            
-            # Get nearest words
-            nearest_words = EMBEDDING_STORE.get_nearest_words(
-                entity_embedding, 
-                top_n=50,
-                max_distance=5.0
-            )
-            
-            if nearest_words:
-                print(f"Found {len(nearest_words)} words for word cloud")
-                print(f"First few words: {[w['word'] for w in nearest_words[:5]]}")
-                
-                # Format for word cloud
-                word_cloud = [
-                    {
-                        'text': w['word'],
-                        'value': 1.0 - (w['distance'] / 5.0)  # Convert distance to similarity
-                    }
-                    for w in nearest_words
-                ]
-                
-                print(f"Generated word cloud with {len(word_cloud)} words from embeddings")
-    
+    # --- Word Cloud Generation (for initial focus view) ---
+    # Use the analyzer to get a consistent word cloud
+    word_cloud = ANALYZER.get_word_cloud(
+        entity_type=entity_type,
+        entity_name=entity_name,
+        top_n=50,  # A reasonable default for the initial view
+        max_distance=5.0,
+        filter_stopwords=True
+    )
+    if word_cloud is None:
+        word_cloud = [] # Default to empty list if no cloud can be generated
+
     # Prepare response
     response = {
         'entity': {
@@ -243,18 +221,12 @@ def get_entity_word_cloud():
     - max_distance: Maximum distance threshold (default: 5.0)
     - filter_stopwords: Whether to filter out common German stopwords (default: true)
     """
-    if EMBEDDING_STORE is None:
-        return jsonify({
-            'error': 'Word embedding store not available',
-            'message': 'Embeddings have not been loaded. Please check server configuration.'
-        }), 503
-    
     # Get query parameters
     entity_type = request.args.get('entity_type')
     entity_name = request.args.get('entity_name')
     top_n = int(request.args.get('top_n', 100))
-    max_distance = float(request.args.get('max_distance', 5.0))  # Updated default to 5.0
-    filter_stopwords = request.args.get('filter_stopwords', 'true').lower() == 'true'  # Add stopword filtering
+    max_distance = float(request.args.get('max_distance', 5.0))
+    filter_stopwords = request.args.get('filter_stopwords', 'true').lower() == 'true'
     
     if not entity_type or not entity_name:
         return jsonify({
@@ -262,37 +234,21 @@ def get_entity_word_cloud():
             'message': 'Both entity_type and entity_name must be provided'
         }), 400
     
-    # Map entity name to lowercase for consistent lookup
-    entity_name = entity_name.lower()
-    
-    # Get entity embedding
-    entity_embedding = LATENT_SPACE.get_entity_embedding(entity_type, entity_name)
-    if entity_embedding is None:
-        return jsonify({
-            'error': 'Entity not found',
-            'message': f'No embedding found for {entity_type} {entity_name}'
-        }), 404
-    
-    # Find nearest words
-    nearest_words = LATENT_SPACE.get_word_cloud_for_entity(
-        entity_type,
-        entity_name,
+    # Use the analyzer to get the word cloud, which handles stopword filtering correctly
+    word_cloud_data = ANALYZER.get_word_cloud(
+        entity_type=entity_type,
+        entity_name=entity_name,
         top_n=top_n,
         max_distance=max_distance,
         filter_stopwords=filter_stopwords
     )
     
-    # Format for word cloud
-    word_cloud_data = [
-        {
-            'text': w.get('text', w.get('word', '')),  # Handle both 'text' and 'word' field names
-            'value': w.get('value', 1.0 - w.get('distance', 0)),  # Convert distance to similarity if needed
-            'distance': w.get('distance', 0),
-            'position': w.get('position', [0, 0, 0])  # Include position data for layout
-        }
-        for w in nearest_words
-    ]
-    
+    if word_cloud_data is None:
+        return jsonify({
+            'error': 'Entity not found',
+            'message': f'Could not generate word cloud for {entity_type} {entity_name}'
+        }), 404
+
     return jsonify({
         'entity': {
             'type': entity_type,
